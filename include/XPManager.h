@@ -26,6 +26,12 @@ namespace EA::XPManager {
     int  GetPendingLevelUps();
     void SetPendingLevelUps(int count);
 
+    // Level-up in-progress flag.
+    // True between TriggerLevelUp and the "Level Increases" TrackedStat event.
+    // Prevents writing to the XP bucket while the engine is processing a level-up.
+    bool GetLevelUpInProgress();
+    void SetLevelUpInProgress(bool val);
+
     // Kill deduplication guard.
     // Returns true if this is a new kill (XP should be awarded).
     // Returns false if this FormID was already processed this session.

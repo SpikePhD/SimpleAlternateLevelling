@@ -7,9 +7,10 @@ namespace EA::XPManager {
     // -----------------------------------------------------------------------
     // State
     // -----------------------------------------------------------------------
-    static float                          s_currentXP       = 0.0f;
-    static int                            s_trackedLevel    = 1;
-    static int                            s_pendingLevelUps = 0;
+    static float                          s_currentXP          = 0.0f;
+    static int                            s_trackedLevel       = 1;
+    static int                            s_pendingLevelUps    = 0;
+    static bool                           s_levelUpInProgress  = false;
     static std::unordered_set<RE::FormID> s_deadActors;
     static std::unordered_set<RE::FormID> s_completedQuests;
 
@@ -22,6 +23,11 @@ namespace EA::XPManager {
     void  SetTrackedLevel(int lvl)  { s_trackedLevel = lvl; }
     int   GetPendingLevelUps()      { return s_pendingLevelUps; }
     void  SetPendingLevelUps(int n) { s_pendingLevelUps = n; }
+    bool  GetLevelUpInProgress()        { return s_levelUpInProgress; }
+    void  SetLevelUpInProgress(bool val) {
+        s_levelUpInProgress = val;
+        logger::info("[EA] LevelUpInProgress set to {}.", val);
+    }
 
     // -----------------------------------------------------------------------
     // Kill guard
@@ -136,11 +142,20 @@ namespace EA::XPManager {
         auto* player = RE::PlayerCharacter::GetSingleton();
         if (!player) return;
 
+        // Guard: never fire while the engine is still processing a level-up.
+        // The "Level Increases" TrackedStat event will call us again when ready.
+        if (s_levelUpInProgress) {
+            logger::info("[EA] FirePendingLevelUp: level-up in progress — "
+                         "deferring. Pending: {}", s_pendingLevelUps);
+            return;
+        }
+
+        s_levelUpInProgress = true;
         s_pendingLevelUps--;
         s_trackedLevel++;
 
         logger::info("[EA] FirePendingLevelUp: Triggering level-up to {}. "
-                     "Remaining pending: {}",
+                     "Remaining pending: {} | InProgress: true",
                      s_trackedLevel, s_pendingLevelUps);
 
         TriggerLevelUp(player);

@@ -106,8 +106,15 @@ namespace EA::EventSinks {
             // chaining multiple level-ups one per engine cycle with full vanilla UI.
             if (stat == "Level Increases") {
                 logger::info("[EA] TrackedStat: Level Increases = {}. "
-                             "Checking for pending level-ups (pending={}).",
-                             event->value, EA::XPManager::GetPendingLevelUps());
+                             "Engine finished level-up. Clearing in-progress flag. "
+                             "Pending: {}",
+                             event->value,
+                             EA::XPManager::GetPendingLevelUps());
+
+                // Clear the flag FIRST so FirePendingLevelUp is unblocked.
+                EA::XPManager::SetLevelUpInProgress(false);
+
+                // Then fire the next pending level-up if any.
                 EA::XPManager::FirePendingLevelUp();
                 return RE::BSEventNotifyControl::kContinue;
             }

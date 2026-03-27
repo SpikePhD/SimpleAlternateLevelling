@@ -117,6 +117,7 @@ namespace {
         // are invalid in the new save's worldspace.
         EA::XPManager::ResetKillGuard();
         EA::XPManager::ResetQuestGuard();
+        EA::XPManager::SetLevelUpInProgress(false);
 
         std::uint32_t type, version, length;
         while (intfc->GetNextRecordInfo(type, version, length)) {
@@ -162,6 +163,7 @@ namespace {
         EA::XPManager::SetCurrentXP(0.0f);
         EA::XPManager::SetTrackedLevel(1);
         EA::XPManager::SetPendingLevelUps(0);
+        EA::XPManager::SetLevelUpInProgress(false);
         EA::XPManager::ResetKillGuard();
         EA::XPManager::ResetQuestGuard();
         logger::info("[EA] Cosave: Reverted — all state reset.");
