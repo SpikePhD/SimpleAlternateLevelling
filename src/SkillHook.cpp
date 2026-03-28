@@ -1,6 +1,7 @@
 #include "PCH.h"
 #include "SkillHook.h"
 #include "Config.h"
+#include "XPManager.h"
 
 namespace EA::SkillHook {
 
@@ -37,19 +38,72 @@ namespace EA::SkillHook {
         static inline REL::Relocation<decltype(thunk)> func;
     };
 
+    // -----------------------------------------------------------------------
+    // BOOK READ HOOK — TESObjectBOOK::Read
+    //
+    // Intercepts the moment a book is read by the player.
+    // We check IsRead() BEFORE calling the original — if false, this is the
+    // first time the player has read this book, so we award XP.
+    // Vanilla sets the read flag during the original call, so our check
+    // correctly fires only once per unique book.
+    //
+    // Skill books: handled via "Skill Books Read" TrackedStat in EventSinks.
+    // We skip them here (GetSkill() != kNone) to avoid double-awarding.
+    //
+    // Address: RELOCATION_ID(17439, 17842)
+    // Verified via: CommonLibSSE-NG src/RE/T/TESObjectBOOK.cpp line 60
+    // Return type: bool (must match — vanilla returns true on success)
+    // -----------------------------------------------------------------------
+    struct BookReadHook {
+
+        static bool thunk(
+            RE::TESObjectBOOK* a_book,
+            RE::TESObjectREFR* a_reader)
+        {
+            if (a_book && a_reader && a_reader->IsPlayerRef()) {
+                bool isSkillBook = (a_book->GetSkill() != RE::ActorValue::kNone);
+                bool alreadyRead = a_book->IsRead();
+
+                if (!alreadyRead && !isSkillBook) {
+                    logger::info("[EA] BookHook: First read of '{}' (FormID={:08X}). "
+                                 "Awarding {:.1f} XP.",
+                                 a_book->GetFullName(),
+                                 a_book->GetFormID(),
+                                 EA::Config::xpBookNew);
+                    EA::XPManager::AwardXP(EA::Config::xpBookNew, "book_read");
+                } else if (EA::Config::verbose) {
+                    if (alreadyRead) {
+                        logger::trace("[EA] BookHook: '{}' already read — skipped.",
+                                      a_book->GetFullName());
+                    }
+                    // Skill books: no trace needed, TrackedStat handles logging
+                }
+            }
+
+            // Always call original — vanilla sets the read flag, teaches spells,
+            // and handles the book-reading animation/UI
+            return func(a_book, a_reader);
+        }
+
+        static inline REL::Relocation<decltype(thunk)> func;
+    };
+
     void Install() {
+        auto& trampoline = SKSE::GetTrampoline();
+        trampoline.create(128);  // 128 bytes: enough for two write_branch<5> hooks
+
         // AE Address ID 40488 = PlayerCharacter::AddSkillExperience
         // Verified via CommonLibSSE-NG: RELOCATION_ID(39413, 40488)
-        REL::Relocation<std::uintptr_t> target{ REL::ID(40488) };
-
-        auto& trampoline = SKSE::GetTrampoline();
-        trampoline.create(64);
-
-        // write_branch<5>: hooks the function entry point (5-byte prologue patch).
-        // Not write_call<5> because this is the function itself, not a call site.
+        REL::Relocation<std::uintptr_t> skillTarget{ REL::ID(40488) };
         AddSkillExperienceHook::func =
-            trampoline.write_branch<5>(target.address(), AddSkillExperienceHook::thunk);
+            trampoline.write_branch<5>(skillTarget.address(), AddSkillExperienceHook::thunk);
+        logger::info("[EA] SkillHook: AddSkillExperienceHook installed (ID 40488).");
 
-        logger::info("[EA] SkillHook: Hook installed successfully at address ID 40488 (AddSkillExperience).");
+        // AE Address ID 17842 = TESObjectBOOK::Read
+        // Verified via CommonLibSSE-NG: RELOCATION_ID(17439, 17842)
+        REL::Relocation<std::uintptr_t> bookTarget{ REL::ID(17842) };
+        BookReadHook::func =
+            trampoline.write_branch<5>(bookTarget.address(), BookReadHook::thunk);
+        logger::info("[EA] SkillHook: BookReadHook installed (ID 17842).");
     }
 }

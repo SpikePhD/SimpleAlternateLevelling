@@ -35,10 +35,6 @@ namespace EA::EventSinks {
         {
             if (!event) return RE::BSEventNotifyControl::kContinue;
 
-            // Log every tracked stat unconditionally for diagnostics
-            logger::info("[EA] TrackedStat: '{}' = {}",
-                event->stat.c_str(), event->value);
-
             const auto& stat = event->stat;
 
             if (stat == "Locations Discovered") {
@@ -58,11 +54,7 @@ namespace EA::EventSinks {
                 return RE::BSEventNotifyControl::kContinue;
             }
 
-            if (stat == "Books Read") {
-                // Skyrim's own stat counter handles first-read deduplication natively.
-                XPManager::AwardXP(Config::xpBookNew, "book_read");
-                return RE::BSEventNotifyControl::kContinue;
-            }
+            // "Books Read" dead in AE 1.6.1170 — XP now via BookReadHook in SkillHook.cpp.
 
             if (stat == "Skill Books Read") {
                 // "Skill Books Read" is the ONLY stat that fires for skill books in AE.
@@ -127,16 +119,19 @@ namespace EA::EventSinks {
                 return RE::BSEventNotifyControl::kContinue;
             }
 
-            // Kill stats: logged for cross-reference; XP via TESDeathEvent with
-            // per-actor FormID deduplication guard.
+            // Kill stats: XP via TESDeathEvent with per-actor FormID dedup.
+            // No log here — kill sink already logs each kill with full detail.
             if (stat == "People Killed"    || stat == "Animals Killed"  ||
                 stat == "Creatures Killed" || stat == "Undead Killed"   ||
                 stat == "Daedra Killed"    || stat == "Automatons Killed") {
-                logger::info("[EA] TrackedStat: Kill stat '{}' = {} — XP via death sink.",
-                    event->stat.c_str(), event->value);
                 return RE::BSEventNotifyControl::kContinue;
             }
 
+            // Unrecognized stat — silent unless verbose mode is on
+            if (EA::Config::verbose) {
+                logger::trace("[EA] TrackedStat (unhandled): '{}' = {}",
+                              event->stat.c_str(), event->value);
+            }
             return RE::BSEventNotifyControl::kContinue;
         }
     };
