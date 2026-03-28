@@ -2,7 +2,7 @@
   "_comment": "Experience and Attributes config. Edit values freely. Re-launch game to apply.",
 
   "debug": {
-    "verbose": false,
+    "verbose": true,
     "max_log_files": 10,
     "_comment_verbose": "Set true to enable trace logging (skill hook intercepts, event details). WARNING: generates large log files.",
     "_comment_max_log_files": "Maximum number of session log files to keep in the Spike folder. Oldest are deleted first."
@@ -60,9 +60,30 @@
     }
   },
 
+  "skill_allocation": {
+    "points_per_level": 10,
+    "panel_width": 820,
+    "panel_height": 0,
+    "panel_y_offset": -90,
+    "row_gap": 36,
+    "column_gap": 22,
+    "label_value_gap": 4,
+    "value_arrow_gap": 2,
+    "button_top_gap": 18,
+    "button_row_offset": 12,
+    "button_gap": 16,
+    "font_size": 13,
+    "header_font_size": 16,
+    "_comment": "Skill points awarded per level-up. Unspent points carry over to the next level.",
+    "_comment_panel": "panel_width/panel_height in pixels (1280x720 canvas). Set panel_height to 0 for auto-size based on the menu content.",
+    "_comment_panel_y": "panel_y_offset is a signed pixel offset applied after centering. Negative values move the panel upward.",
+    "_comment_spacing": "row_gap controls row cadence. column_gap spreads the three skill groups apart. label_value_gap and value_arrow_gap tighten or loosen the [label value arrow] cluster. button_top_gap affects auto-height spacing, button_row_offset moves only the Reset/Confirm row, and button_gap controls spacing between the two buttons.",
+    "_comment_font": "font_size for skill names/levels; header_font_size for the points-remaining header."
+  },
+
   "leveling": {
-    "xp_base":     75.0,
-    "xp_increase": 25.0,
+    "xp_base":     5.0,
+    "xp_increase": 1.0,
     "xp_cap":      500.0,
     "_comment": "xp_base maps to fXPLevelUpBase, xp_increase to fXPLevelUpMult.",
     "_comment_formula": "threshold(level) = min(xp_cap, xp_base + level * xp_increase)",

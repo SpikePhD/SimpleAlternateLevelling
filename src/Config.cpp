@@ -128,6 +128,25 @@ namespace EA::Config {
         xpIncrease = ReadFloat(j, {"leveling", "xp_increase"}, xpIncrease);
         xpCap      = ReadFloat(j, {"leveling", "xp_cap"},      xpCap);
 
+        // Skill allocation
+        skillPointsPerLevel = static_cast<int>(ReadFloat(j,
+            {"skill_allocation", "points_per_level"},
+            static_cast<float>(skillPointsPerLevel)));
+
+        // Skill menu UI layout
+        menuPanelWidth     = static_cast<int>(ReadFloat(j, {"skill_allocation", "panel_width"},     static_cast<float>(menuPanelWidth)));
+        menuPanelHeight    = static_cast<int>(ReadFloat(j, {"skill_allocation", "panel_height"},    static_cast<float>(menuPanelHeight)));
+        menuPanelYOffset   = static_cast<int>(ReadFloat(j, {"skill_allocation", "panel_y_offset"},  static_cast<float>(menuPanelYOffset)));
+        menuSkillRowGap    = static_cast<int>(ReadFloat(j, {"skill_allocation", "row_gap"},         static_cast<float>(menuSkillRowGap)));
+        menuSkillColumnGap = static_cast<int>(ReadFloat(j, {"skill_allocation", "column_gap"},      static_cast<float>(menuSkillColumnGap)));
+        menuSkillLabelValueGap = static_cast<int>(ReadFloat(j, {"skill_allocation", "label_value_gap"}, static_cast<float>(menuSkillLabelValueGap)));
+        menuSkillValueArrowGap = static_cast<int>(ReadFloat(j, {"skill_allocation", "value_arrow_gap"}, static_cast<float>(menuSkillValueArrowGap)));
+        menuSkillButtonTopGap = static_cast<int>(ReadFloat(j, {"skill_allocation", "button_top_gap"}, static_cast<float>(menuSkillButtonTopGap)));
+        menuSkillButtonRowOffset = static_cast<int>(ReadFloat(j, {"skill_allocation", "button_row_offset"}, static_cast<float>(menuSkillButtonRowOffset)));
+        menuSkillButtonGap   = static_cast<int>(ReadFloat(j, {"skill_allocation", "button_gap"},      static_cast<float>(menuSkillButtonGap)));
+        menuFontSize       = static_cast<int>(ReadFloat(j, {"skill_allocation", "font_size"},       static_cast<float>(menuFontSize)));
+        menuHeaderFontSize = static_cast<int>(ReadFloat(j, {"skill_allocation", "header_font_size"}, static_cast<float>(menuHeaderFontSize)));
+
         // Log what was loaded (always visible, not gated by verbose)
         logger::info("[EA] Config loaded from: {}", configPath.string());
         logger::info("[EA] Config: verbose={}", verbose);
@@ -144,6 +163,10 @@ namespace EA::Config {
             xpLockNovice, xpLockApprentice, xpLockAdept, xpLockExpert, xpLockMaster);
         logger::info("[EA] Config: Leveling — xp_base={:.1f}, xp_increase={:.1f}, xp_cap={:.1f}",
             xpBase, xpIncrease, xpCap);
+        logger::info("[EA] Config: Skill allocation — points_per_level={}, panel={}x{}, y_offset={}, row_gap={}, column_gap={}, label_value_gap={}, value_arrow_gap={}, button_top_gap={}, button_gap={}, font={}/{}",
+            skillPointsPerLevel, menuPanelWidth, menuPanelHeight, menuPanelYOffset,
+            menuSkillRowGap, menuSkillColumnGap, menuSkillLabelValueGap, menuSkillValueArrowGap,
+            menuSkillButtonTopGap, menuSkillButtonGap, menuFontSize, menuHeaderFontSize);
         logger::info("[EA] Config: max_log_files={}", maxLogFiles);
 
         // Dump the entire raw JSON to the log for a complete session config record

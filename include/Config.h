@@ -54,6 +54,23 @@ namespace EA::Config {
     inline float xpIncrease =  25.0f;
     inline float xpCap      = 1000.0f;
 
+    // Skill allocation
+    inline int skillPointsPerLevel = 10;
+
+    // Skill menu UI layout (passed to SWF at runtime)
+    inline int menuPanelWidth     = 820;
+    inline int menuPanelHeight    = 0;
+    inline int menuPanelYOffset   = -90;
+    inline int menuSkillRowGap    = 36;
+    inline int menuSkillColumnGap = 22;
+    inline int menuSkillLabelValueGap = 4;
+    inline int menuSkillValueArrowGap = 2;
+    inline int menuSkillButtonTopGap = 18;
+    inline int menuSkillButtonRowOffset = 12;
+    inline int menuSkillButtonGap = 16;
+    inline int menuFontSize       = 13;
+    inline int menuHeaderFontSize = 16;
+
     // -----------------------------------------------------------------------
     // Loads config from JSON. Safe to call before game data is loaded.
     // Missing keys fall back to the inline defaults above.
