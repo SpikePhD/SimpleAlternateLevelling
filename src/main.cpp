@@ -137,16 +137,19 @@ namespace {
 
                 EA::XPManager::SetCurrentXP(xp);
 
-                // Restore the XP into the engine's bucket.
-                // skills->data->xp was reset to 0 by the engine on load,
-                // so we write our saved value back directly.
+                // Restore the XP into the engine's bucket and recalculate the
+                // threshold for the current level using our formula.
                 auto* player = RE::PlayerCharacter::GetSingleton();
                 if (player) {
                     auto* skills = player->GetInfoRuntimeData().skills;
                     if (skills && skills->data) {
                         skills->data->xp = xp;
-                        skills->data->levelThreshold =
-                            std::min(skills->data->levelThreshold, EA::Config::xpCap);
+                        int   level        = static_cast<int>(player->GetLevel());
+                        float newThreshold = std::min(EA::Config::xpCap,
+                            EA::Config::xpBase + static_cast<float>(level) * EA::Config::xpIncrease);
+                        skills->data->levelThreshold = newThreshold;
+                        logger::info("[EA] Cosave: levelThreshold set to {:.1f} for level {}.",
+                                     newThreshold, level);
                     }
                 }
 
@@ -194,14 +197,23 @@ namespace {
             logger::warn("[EA] OnDataLoaded: GameSettingCollection is null — leveling curve NOT applied.");
         }
 
-        // Clamp the current level's threshold in case we are loading into a save
-        // where the vanilla formula result exceeds our configured cap.
+        // Recalculate and write levelThreshold for the current level.
+        //
+        // skills->data->levelThreshold is baked at character creation using the
+        // vanilla game settings active at that time. Setting fXPLevelUpBase/Mult
+        // above only affects the engine's NEXT threshold calculation (after a
+        // level-up) — it does not retroactively update the stored threshold.
+        // We must write it directly so the engine uses our formula from the start.
         auto* player = RE::PlayerCharacter::GetSingleton();
         if (player) {
             auto* skills = player->GetInfoRuntimeData().skills;
             if (skills && skills->data) {
-                skills->data->levelThreshold =
-                    std::min(skills->data->levelThreshold, EA::Config::xpCap);
+                int   level        = static_cast<int>(player->GetLevel());
+                float newThreshold = std::min(EA::Config::xpCap,
+                    EA::Config::xpBase + static_cast<float>(level) * EA::Config::xpIncrease);
+                skills->data->levelThreshold = newThreshold;
+                logger::info("[EA] OnDataLoaded: levelThreshold set to {:.1f} for level {}.",
+                             newThreshold, level);
             }
         }
 
