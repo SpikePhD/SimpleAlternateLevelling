@@ -116,6 +116,38 @@ namespace {
     // Persisted in cosave (v5). True after NormalizeSkills() has run for this
     // character. Prevents the normalization from re-running on every load.
     static bool s_skillsNormalized = false;
+    static bool s_normalizeTaskQueued = false;
+
+    static bool IsCreationMenuOpen() {
+        auto* ui = RE::UI::GetSingleton();
+        if (!ui) {
+            return false;
+        }
+
+        return ui->IsMenuOpen("RaceSex Menu") || ui->IsMenuOpen("RaceMenu");
+    }
+
+    static std::vector<RE::ActorValue> GetSkillActorValues() {
+        std::vector<RE::ActorValue> skills;
+        auto* avList = RE::ActorValueList::GetSingleton();
+        if (!avList) {
+            logger::warn("[EA] NormalizeSkills: ActorValueList is null.");
+            return skills;
+        }
+
+        const auto total = static_cast<int>(RE::ActorValue::kTotal);
+        skills.reserve(18);
+        for (int i = 0; i < total; ++i) {
+            auto  av   = static_cast<RE::ActorValue>(i);
+            auto* info = avList->GetActorValue(av);
+            if (!info || !info->skill) {
+                continue;
+            }
+            skills.push_back(av);
+        }
+
+        return skills;
+    }
 
     static void NormalizeSkills() {
         if (!EA::Config::resetSkillsOnNewGame) return;
@@ -126,27 +158,58 @@ namespace {
             return;
         }
 
-        constexpr RE::ActorValue kSkills[] = {
-            RE::ActorValue::kOneHanded,   RE::ActorValue::kTwoHanded,
-            RE::ActorValue::kArchery,     RE::ActorValue::kBlock,
-            RE::ActorValue::kSmithing,    RE::ActorValue::kHeavyArmor,
-            RE::ActorValue::kLightArmor,  RE::ActorValue::kPickpocket,
-            RE::ActorValue::kLockpicking, RE::ActorValue::kSneak,
-            RE::ActorValue::kAlchemy,     RE::ActorValue::kSpeech,
-            RE::ActorValue::kAlteration,  RE::ActorValue::kConjuration,
-            RE::ActorValue::kDestruction, RE::ActorValue::kIllusion,
-            RE::ActorValue::kRestoration, RE::ActorValue::kEnchanting,
-        };
-
         auto* avo = static_cast<RE::Actor*>(player)->AsActorValueOwner();
+        auto  skills = GetSkillActorValues();
+        if (skills.empty()) {
+            logger::warn("[EA] NormalizeSkills: no skill actor values were discovered.");
+            return;
+        }
+
+        auto* avList = RE::ActorValueList::GetSingleton();
         logger::info("[EA] NormalizeSkills: reading skill values before reset:");
-        for (auto av : kSkills) {
-            float val = avo->GetBaseActorValue(av);
-            logger::info("[EA]   skill {} = {:.1f}", static_cast<int>(av), val);
-            avo->SetBaseActorValue(av, 0.0f);
+        for (auto av : skills) {
+            auto* info = avList ? avList->GetActorValue(av) : nullptr;
+            const char* name = (info && info->fullName.data() && info->fullName.data()[0])
+                ? info->fullName.data()
+                : "???";
+
+            float current = avo->GetBaseActorValue(av);
+            logger::info("[EA]   skill '{}' ({}) = {:.1f}", name, static_cast<int>(av), current);
+            if (current != 0.0f) {
+                avo->SetBaseActorValue(av, current - current);
+            }
+
+            float residual = avo->GetActorValue(av);
+            if (residual != 0.0f) {
+                avo->ModActorValue(av, -residual);
+            }
         }
         s_skillsNormalized = true;
-        logger::info("[EA] NormalizeSkills: all 18 skills set to 0 (one-time reset done).");
+        logger::info("[EA] NormalizeSkills: all discovered skills set to 0 (one-time reset done).");
+    }
+
+    static void QueueNormalizeSkillsWhenReady() {
+        if (!EA::Config::resetSkillsOnNewGame || !s_awaitingCharCreate || s_skillsNormalized || s_normalizeTaskQueued) {
+            return;
+        }
+
+        s_normalizeTaskQueued = true;
+        SKSE::GetTaskInterface()->AddTask([]() {
+            s_normalizeTaskQueued = false;
+
+            if (!EA::Config::resetSkillsOnNewGame || !s_awaitingCharCreate || s_skillsNormalized) {
+                return;
+            }
+
+            if (IsCreationMenuOpen()) {
+                QueueNormalizeSkillsWhenReady();
+                return;
+            }
+
+            s_awaitingCharCreate = false;
+            logger::info("[EA] RaceSex/RaceMenu closed on new game â€” normalizing skills now.");
+            NormalizeSkills();
+        });
     }
 
     // Watches for RaceMenu closing on a new game and queues NormalizeSkills.
@@ -167,6 +230,12 @@ namespace {
                 return RE::BSEventNotifyControl::kContinue;
 
             if (s_awaitingCharCreate && !s_skillsNormalized) {
+                logger::info("[EA] Menu '{}' closed during character creation - checking whether skills can be normalized.",
+                    event->menuName.c_str());
+                QueueNormalizeSkillsWhenReady();
+            }
+#if 0
+            if (s_awaitingCharCreate && !s_skillsNormalized) {
                 s_awaitingCharCreate = false;
                 logger::info("[EA] RaceMenu closed on new game — queuing NormalizeSkills.");
                 // Chain two AddTask calls to defer normalization by 2 game frames,
@@ -175,6 +244,7 @@ namespace {
                     SKSE::GetTaskInterface()->AddTask(NormalizeSkills);
                 });
             }
+#endif
             return RE::BSEventNotifyControl::kContinue;
         }
     };
@@ -337,6 +407,10 @@ namespace {
         if (ui) {
             ui->AddEventSink(&s_charCreateWatcher);
             logger::info("[EA] OnDataLoaded: CharCreateWatcher registered.");
+            if (s_awaitingCharCreate && !s_skillsNormalized) {
+                logger::info("[EA] OnDataLoaded: kNewGame already armed - checking whether creation menus are still open.");
+                QueueNormalizeSkillsWhenReady();
+            }
         } else {
             logger::warn("[EA] OnDataLoaded: UI singleton null — CharCreateWatcher NOT registered.");
         }
@@ -361,7 +435,9 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse) {
             // New character — arm the CharCreateWatcher to fire on RaceMenu close.
             s_awaitingCharCreate = true;
             s_skillsNormalized   = false;
+            s_normalizeTaskQueued = false;
             logger::info("[EA] kNewGame: awaiting RaceMenu close to normalize skills.");
+            QueueNormalizeSkillsWhenReady();
         }
         // kPostLoadGame: no skill-reset logic here.
         // CharCreateWatcher fires before any save exists, so kPostLoadGame is
