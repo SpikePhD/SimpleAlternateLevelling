@@ -2,30 +2,46 @@
 #include "EventSinks.h"
 #include "XPManager.h"
 #include "Config.h"
+#include "RE/B/BooksRead.h"
 
 // TESTrackedStatsEvent is fully defined in CommonLibSSE-NG at
 // RE/T/TESTrackedStatsEvent.h (included transitively via RE/Skyrim.h in PCH).
-// Struct layout: { BSFixedString stat; int32_t value; uint32_t pad0C; }
-// No forward declaration needed.
 
 namespace EA::EventSinks {
 
+    // Cache the lock difficulty seen in TESLockChangedEvent; consumed by "Locks Picked" stat.
+    static RE::LOCK_LEVEL s_cachedLockLevel = RE::LOCK_LEVEL::kVeryEasy;
+
+    struct OnBookRead : public RE::BSTEventSink<RE::BooksRead::Event> {
+        RE::BSEventNotifyControl ProcessEvent(
+            const RE::BooksRead::Event* event,
+            RE::BSTEventSource<RE::BooksRead::Event>*) override
+        {
+            if (!event || !event->book) {
+                return RE::BSEventNotifyControl::kContinue;
+            }
+
+            auto* book = event->book;
+            auto  formID = book->GetFormID();
+            auto  title = book->GetFullName();
+            bool  alreadyRead = book->IsRead();
+            bool  skillBook = event->skillBook;
+
+            if (!XPManager::RegisterBookRead(formID)) {
+                logger::debug("[EA] Book guard: duplicate event for '{}' (FormID={:08X}) skillBook={} alreadyRead={} â€” skipped.",
+                    title, formID, skillBook, alreadyRead);
+                return RE::BSEventNotifyControl::kContinue;
+            }
+
+            XPManager::AwardXP(
+                skillBook ? Config::xpBookSkill : Config::xpBookNew,
+                XPManager::MakeBookContext(title, formID, skillBook, alreadyRead));
+            return RE::BSEventNotifyControl::kContinue;
+        }
+    };
+
     // -----------------------------------------------------------------------
-    // PRIMARY SINK — TESTrackedStatsEvent
-    //
-    // Skyrim fires this event every time any value on the Statistics journal
-    // page increments. One sink replaces all the proxy events used in Task 4.
-    //
-    // Stat strings verified from SKSE source and community research:
-    //   "Locations Discovered"   — new map marker uncovered
-    //   "Dungeons Cleared"       — location boss killed / cleared flag set
-    //   "Locks Picked"           — lockpick success only (not key opens)
-    //   "Books Read"             — first read of each unique book
-    //   "Skill Books Read"       — fires ADDITIONALLY for skill books; we skip
-    //                              to avoid double-awarding (Books Read covers it)
-    //   "Quests Completed"       — all quest types (no type info available here)
-    //   "Misc Objectives Completed" — misc tasks
-    //   Kill stats               — logged for cross-reference; XP via TESDeathEvent
+    // PRIMARY SINK â€” TESTrackedStatsEvent
     // -----------------------------------------------------------------------
     struct OnTrackedStats : public RE::BSTEventSink<RE::TESTrackedStatsEvent> {
 
@@ -38,64 +54,72 @@ namespace EA::EventSinks {
             const auto& stat = event->stat;
 
             if (stat == "Locations Discovered") {
-                XPManager::AwardXP(Config::xpLocationDiscovered, "location_discovered");
+                XPManager::AwardXP(Config::xpLocationDiscovered,
+                    XPManager::MakeStatContext(stat, "location_discovered", event->value, "discovered"));
                 return RE::BSEventNotifyControl::kContinue;
             }
 
             if (stat == "Dungeons Cleared") {
-                XPManager::AwardXP(Config::xpLocationCleared, "location_cleared");
+                XPManager::AwardXP(Config::xpLocationCleared,
+                    XPManager::MakeStatContext(stat, "location_cleared", event->value, "cleared"));
                 return RE::BSEventNotifyControl::kContinue;
             }
 
             if (stat == "Locks Picked") {
-                // No lock level in TESTrackedStatsEvent — flat novice XP for now.
-                // Difficulty scaling deferred to Task 5 (secondary hook on lockpick fn).
-                XPManager::AwardXP(Config::xpLockNovice, "lock_picked");
+                float            xp      = Config::xpLockNovice;
+                std::string_view subtype = "novice";
+                switch (s_cachedLockLevel) {
+                    case RE::LOCK_LEVEL::kVeryEasy: xp = Config::xpLockNovice;     subtype = "novice";     break;
+                    case RE::LOCK_LEVEL::kEasy:     xp = Config::xpLockApprentice; subtype = "apprentice"; break;
+                    case RE::LOCK_LEVEL::kAverage:  xp = Config::xpLockAdept;      subtype = "adept";      break;
+                    case RE::LOCK_LEVEL::kHard:     xp = Config::xpLockExpert;     subtype = "expert";     break;
+                    case RE::LOCK_LEVEL::kVeryHard: xp = Config::xpLockMaster;     subtype = "master";     break;
+                    default:                        xp = Config::xpLockNovice;     subtype = "novice";     break;
+                }
+                s_cachedLockLevel = RE::LOCK_LEVEL::kVeryEasy;  // reset after consumption
+                XPManager::AwardXP(xp,
+                    XPManager::MakeStatContext(stat, "lock_picked", event->value, subtype));
                 return RE::BSEventNotifyControl::kContinue;
             }
-
-            // "Books Read" dead in AE 1.6.1170 — XP now via BookReadHook in SkillHook.cpp.
 
             if (stat == "Skill Books Read") {
-                // "Skill Books Read" is the ONLY stat that fires for skill books in AE.
-                // "Books Read" does NOT fire for skill books — award XP here directly.
-                logger::info("[EA] TrackedStat: Skill book read. Awarding {:.1f} XP.",
-                             Config::xpBookSkill);
-                XPManager::AwardXP(Config::xpBookSkill, "book_skill");
+                logger::info("[EA] TrackedStat: Skill Books Read observed (diagnostic only). Counter={}.",
+                             event->value);
                 return RE::BSEventNotifyControl::kContinue;
             }
 
-            // "Quests Completed" — carries no quest type or FormID.
-            // Per-type XP (with FormID dedup) is handled by OnQuestStage below.
-            // We do NOT award XP here to avoid doubling with the stage sink,
-            // since both sinks share the same FormID guard key space.
+            if (stat == "Skill Increases") {
+                auto* player = RE::PlayerCharacter::GetSingleton();
+                auto* skills = player ? player->GetInfoRuntimeData().skills : nullptr;
+                float engineXP = (skills && skills->data) ? skills->data->xp : -1.0f;
+                float threshold = (skills && skills->data) ? skills->data->levelThreshold : -1.0f;
+
+                logger::info("[EA] TrackedStat: Skill Increases observed (diagnostic only). Counter={} | engine_xp={:.1f} threshold={:.1f} level={}.",
+                    event->value,
+                    engineXP,
+                    threshold,
+                    player ? static_cast<int>(player->GetLevel()) : -1);
+                return RE::BSEventNotifyControl::kContinue;
+            }
+
             if (stat == "Quests Completed") {
                 logger::info("[EA] TrackedStat: Quest completed counter={}. XP via quest stage sink.",
                     event->value);
                 return RE::BSEventNotifyControl::kContinue;
             }
 
-            // "Misc Objectives Completed" — misc quests never set IsCompleted(),
-            // so the quest stage sink's guard rejects them. This is the ONLY place
-            // misc quest XP is awarded. Each counter increment = one distinct action,
-            // so no FormID guard is needed here.
             if (stat == "Misc Objectives Completed") {
-                logger::info("[EA] TrackedStat: Misc objective completed (counter={}). Awarding {:.1f} XP.",
-                    event->value, Config::xpQuestMisc);
-                XPManager::AwardXP(Config::xpQuestMisc, "quest_misc");
+                XPManager::AwardXP(Config::xpQuestMisc,
+                    XPManager::MakeStatContext(stat, "quest_misc", event->value, "misc_objective"));
                 return RE::BSEventNotifyControl::kContinue;
             }
 
             if (stat == "Items Pickpocketed") {
-                logger::info("[EA] TrackedStat: Item pickpocketed. Awarding {:.1f} XP.", Config::xpPickpocketBase);
-                XPManager::AwardXP(Config::xpPickpocketBase, "pickpocket");
+                XPManager::AwardXP(Config::xpPickpocketBase,
+                    XPManager::MakeStatContext(stat, "pickpocket", event->value, "base"));
                 return RE::BSEventNotifyControl::kContinue;
             }
 
-            // "Level Increases" fires after the engine fully completes a level-up
-            // (attribute screen confirmed, perk point awarded, level incremented).
-            // We use this as the signal to fire the next pending level-up, if any,
-            // chaining multiple level-ups one per engine cycle with full vanilla UI.
             if (stat == "Level Increases") {
                 auto* player = RE::PlayerCharacter::GetSingleton();
                 if (!player) return RE::BSEventNotifyControl::kContinue;
@@ -103,31 +127,24 @@ namespace EA::EventSinks {
                 auto* skills = player->GetInfoRuntimeData().skills;
                 if (!skills || !skills->data) return RE::BSEventNotifyControl::kContinue;
 
-                // Clamp levelThreshold to xp_cap so leveling never stalls at a
-                // value above the cap. The engine already updated the threshold for
-                // the new level; we only clamp if the formula result exceeds the cap.
                 float uncapped = skills->data->levelThreshold;
                 float capped   = std::min(uncapped, EA::Config::xpCap);
                 skills->data->levelThreshold = capped;
 
-                logger::info("[EA] Level Increases = {} | GetLevel()={} | "
-                             "threshold: {:.1f} -> {:.1f} (cap={:.1f})",
-                             event->value,
-                             static_cast<int>(player->GetLevel()),
-                             uncapped, capped, EA::Config::xpCap);
+                logger::info("[EA] Level Increases = {} | GetLevel()={} | threshold: {:.1f} -> {:.1f} (cap={:.1f})",
+                    event->value,
+                    static_cast<int>(player->GetLevel()),
+                    uncapped, capped, EA::Config::xpCap);
 
                 return RE::BSEventNotifyControl::kContinue;
             }
 
-            // Kill stats: XP via TESDeathEvent with per-actor FormID dedup.
-            // No log here — kill sink already logs each kill with full detail.
             if (stat == "People Killed"    || stat == "Animals Killed"  ||
                 stat == "Creatures Killed" || stat == "Undead Killed"   ||
                 stat == "Daedra Killed"    || stat == "Automatons Killed") {
                 return RE::BSEventNotifyControl::kContinue;
             }
 
-            // Unrecognized stat — silent unless verbose mode is on
             if (EA::Config::verbose) {
                 logger::trace("[EA] TrackedStat (unhandled): '{}' = {}",
                               event->stat.c_str(), event->value);
@@ -137,14 +154,7 @@ namespace EA::EventSinks {
     };
 
     // -----------------------------------------------------------------------
-    // KILL SINK — TESDeathEvent
-    // Kept because TESTrackedStatsEvent kill stats lack per-actor FormID,
-    // making deduplication impossible from stats alone.
-    //
-    // XP formula: totalXP = baseXP(type) + max(0, enemyLevel - playerLevel) * scaleFactor
-    // Type detection uses ActorType keywords in priority order:
-    //   Dragon > Daedra > Undead > Animal > Creature > NPC(humanoid) > default
-    // Keywords are cached on first kill (all data is loaded by then).
+    // KILL SINK â€” TESDeathEvent
     // -----------------------------------------------------------------------
     struct OnActorKill : public RE::BSTEventSink<RE::TESDeathEvent> {
         RE::BSEventNotifyControl ProcessEvent(
@@ -165,7 +175,6 @@ namespace EA::EventSinks {
             if (!XPManager::RegisterKill(dying->GetFormID()))
                 return RE::BSEventNotifyControl::kContinue;
 
-            // Cache keyword pointers on first invocation (data is loaded by now)
             static auto* kwDragon   = RE::TESForm::LookupByEditorID<RE::BGSKeyword>("ActorTypeDragon");
             static auto* kwDaedra   = RE::TESForm::LookupByEditorID<RE::BGSKeyword>("ActorTypeDaedra");
             static auto* kwUndead   = RE::TESForm::LookupByEditorID<RE::BGSKeyword>("ActorTypeUndead");
@@ -189,19 +198,14 @@ namespace EA::EventSinks {
                                     * Config::xpKillLevelScaleFactor;
             float totalXP     = baseXP + bonus;
 
-            logger::info("[EA] Kill: '{}' (FormID={:08X}) type={} lv={} player_lv={} | base={:.1f} bonus={:.1f} total={:.1f} XP.",
-                dying->GetName(), dying->GetFormID(), typeName,
-                enemyLevel, playerLevel, baseXP, bonus, totalXP);
-
-            XPManager::AwardXP(totalXP, "kill");
+            XPManager::AwardXP(totalXP,
+                XPManager::MakeKillContext(dying->GetName(), dying->GetFormID(), enemyLevel, typeName));
             return RE::BSEventNotifyControl::kContinue;
         }
     };
 
     // -----------------------------------------------------------------------
-    // QUEST SINK — TESQuestStageEvent
-    // Kept because TESTrackedStatsEvent "Quests Completed" carries no quest
-    // type, so per-type XP differentiation requires this sink.
+    // QUEST SINK â€” TESQuestStageEvent
     // -----------------------------------------------------------------------
     struct OnQuestStage : public RE::BSTEventSink<RE::TESQuestStageEvent> {
         RE::BSEventNotifyControl ProcessEvent(
@@ -241,40 +245,47 @@ namespace EA::EventSinks {
                     xp = Config::xpQuestOther;     typeName = "quest_other";     break;
             }
 
-            logger::info("[EA] Quest completed: '{}' type={} ({}) formID={:08X} | Awarding {:.1f} XP.",
-                quest->GetName(), static_cast<int>(type), typeName, quest->GetFormID(), xp);
-
-            XPManager::AwardXPIfQuestNew(quest->GetFormID(), xp, typeName);
+            XPManager::AwardXPIfQuestNew(quest->GetFormID(), xp,
+                XPManager::MakeQuestContext(quest->GetName(), quest->GetFormID(), typeName));
             return RE::BSEventNotifyControl::kContinue;
         }
     };
 
     // -----------------------------------------------------------------------
-    // ATTRIBUTE TRACKING — TESActorValueChangeEvent
-    //
-    // NOTE: TESActorValueChangeEvent has NO struct definition in this build of
-    // CommonLibSSE-NG (checked include/RE/T/ — file does not exist). The event
-    // is absent from ScriptEventSourceHolder's BSTEventSource base list.
-    // Sink is commented out; attribute selection is NOT tracked this build.
+    // LOCK LEVEL CACHE SINK — TESLockChangedEvent
+    // Caches the lock difficulty level whenever a lock transitions to unlocked.
+    // Consumed by the "Locks Picked" TrackedStat handler to award tier-appropriate XP.
     // -----------------------------------------------------------------------
-    // struct OnActorValueChange : public RE::BSTEventSink<RE::TESActorValueChangeEvent> { ... };
+    struct OnLockChanged : public RE::BSTEventSink<RE::TESLockChangedEvent> {
+        RE::BSEventNotifyControl ProcessEvent(
+            const RE::TESLockChangedEvent*                  event,
+            RE::BSTEventSource<RE::TESLockChangedEvent>*) override
+        {
+            if (!event || !event->lockedObject) return RE::BSEventNotifyControl::kContinue;
+            auto* ref = event->lockedObject.get();
+            if (!ref) return RE::BSEventNotifyControl::kContinue;
 
-    // -----------------------------------------------------------------------
-    // PERK TRACKING — TESPerkEntryRunEvent
-    //
-    // NOTE: TESPerkEntryRunEvent IS forward-declared in ScriptEventSourceHolder.h
-    // and SkyrimVM.h, but has NO struct definition in this CommonLibSSE-NG build
-    // (no RE/T/TESPerkEntryRunEvent.h exists). Field access (perkId, target) is
-    // therefore impossible. Sink is commented out; perk selection NOT tracked.
-    // -----------------------------------------------------------------------
-    // struct OnPerkEntry : public RE::BSTEventSink<RE::TESPerkEntryRunEvent> { ... };
+            auto* extraLock = ref->extraList.GetByType<RE::ExtraLock>();
+            if (!extraLock || !extraLock->lock) return RE::BSEventNotifyControl::kContinue;
+
+            // Cache difficulty whenever a lock becomes unlocked.
+            // IsLocked() checks REFR_LOCK::Flag::kLocked; GetLockLevel() resolves
+            // the LOCK_LEVEL from baseLevel (accounting for leveled lock scaling).
+            if (!extraLock->lock->IsLocked()) {
+                s_cachedLockLevel = extraLock->lock->GetLockLevel(ref);
+            }
+            return RE::BSEventNotifyControl::kContinue;
+        }
+    };
 
     // -----------------------------------------------------------------------
     // Static instances
     // -----------------------------------------------------------------------
+    static OnBookRead     s_bookReadSink;
     static OnTrackedStats s_trackedStatsSink;
     static OnActorKill    s_killSink;
     static OnQuestStage   s_questSink;
+    static OnLockChanged  s_lockChangedSink;
 
     void Register() {
         auto* src = RE::ScriptEventSourceHolder::GetSingleton();
@@ -285,25 +296,34 @@ namespace EA::EventSinks {
 
         logger::info("[EA] EventSinks: Registering sinks...");
 
+        auto* bookSrc = RE::BooksRead::GetEventSource();
+        if (bookSrc) {
+            bookSrc->AddEventSink(&s_bookReadSink);
+            logger::info("[EA] EventSinks: [1/4] BooksRead event sink registered.");
+        } else {
+            logger::error("[EA] EventSinks: BooksRead event source is null.");
+        }
+
         src->GetEventSource<RE::TESTrackedStatsEvent>()->AddEventSink(&s_trackedStatsSink);
-        logger::info("[EA] EventSinks: [1/3] TESTrackedStatsEvent registered.");
+        logger::info("[EA] EventSinks: [2/4] TESTrackedStatsEvent registered.");
 
         src->GetEventSource<RE::TESDeathEvent>()->AddEventSink(&s_killSink);
-        logger::info("[EA] EventSinks: [2/3] TESDeathEvent (kill) registered.");
+        logger::info("[EA] EventSinks: [3/4] TESDeathEvent (kill) registered.");
 
         src->GetEventSource<RE::TESQuestStageEvent>()->AddEventSink(&s_questSink);
-        logger::info("[EA] EventSinks: [3/3] TESQuestStageEvent registered.");
+        logger::info("[EA] EventSinks: [4/5] TESQuestStageEvent registered.");
 
-        // TESActorValueChangeEvent: no struct definition in this CommonLibSSE-NG build.
-        logger::warn("[EA] EventSinks: TESActorValueChangeEvent sink SKIPPED — "
+        src->GetEventSource<RE::TESLockChangedEvent>()->AddEventSink(&s_lockChangedSink);
+        logger::info("[EA] EventSinks: [5/5] TESLockChangedEvent (lock level cache) registered.");
+
+        logger::warn("[EA] EventSinks: TESActorValueChangeEvent sink SKIPPED â€” "
                      "struct not defined in this CommonLibSSE-NG build. "
                      "Attribute selection will not be logged.");
 
-        // TESPerkEntryRunEvent: forward-declared only, no field access possible.
-        logger::warn("[EA] EventSinks: TESPerkEntryRunEvent sink SKIPPED — "
+        logger::warn("[EA] EventSinks: TESPerkEntryRunEvent sink SKIPPED â€” "
                      "struct forward-declared only, no field definitions available. "
                      "Perk selection will not be logged.");
 
-        logger::info("[EA] EventSinks: All sinks registered (3/3 active, 2/2 diagnostic sinks skipped).");
+        logger::info("[EA] EventSinks: All sinks registered (5/5 active, 2/2 diagnostic sinks skipped).");
     }
 }

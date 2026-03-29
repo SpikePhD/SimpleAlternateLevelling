@@ -1,6 +1,7 @@
 #include "PCH.h"
 #include "Config.h"
 #include "SkillHook.h"
+#include "SkillMenu.h"
 #include "EventSinks.h"
 #include "XPManager.h"
 
@@ -104,38 +105,133 @@ namespace {
     }
 
     // -----------------------------------------------------------------------
+    // New-game skill reset
+    // -----------------------------------------------------------------------
+
+    // Set true on kNewGame, cleared when CharCreateWatcher fires.
+    // Guards against kPostLoadGame (which fires before RaceMenu) or mid-game
+    // showracemenu console calls.
+    static bool s_awaitingCharCreate = false;
+
+    // Persisted in cosave (v5). True after NormalizeSkills() has run for this
+    // character. Prevents the normalization from re-running on every load.
+    static bool s_skillsNormalized = false;
+
+    static void NormalizeSkills() {
+        if (!EA::Config::resetSkillsOnNewGame) return;
+
+        auto* player = RE::PlayerCharacter::GetSingleton();
+        if (!player) {
+            logger::warn("[EA] NormalizeSkills: PlayerCharacter is null.");
+            return;
+        }
+
+        constexpr RE::ActorValue kSkills[] = {
+            RE::ActorValue::kOneHanded,   RE::ActorValue::kTwoHanded,
+            RE::ActorValue::kArchery,     RE::ActorValue::kBlock,
+            RE::ActorValue::kSmithing,    RE::ActorValue::kHeavyArmor,
+            RE::ActorValue::kLightArmor,  RE::ActorValue::kPickpocket,
+            RE::ActorValue::kLockpicking, RE::ActorValue::kSneak,
+            RE::ActorValue::kAlchemy,     RE::ActorValue::kSpeech,
+            RE::ActorValue::kAlteration,  RE::ActorValue::kConjuration,
+            RE::ActorValue::kDestruction, RE::ActorValue::kIllusion,
+            RE::ActorValue::kRestoration, RE::ActorValue::kEnchanting,
+        };
+
+        auto* avo = static_cast<RE::Actor*>(player)->AsActorValueOwner();
+        logger::info("[EA] NormalizeSkills: reading skill values before reset:");
+        for (auto av : kSkills) {
+            float val = avo->GetBaseActorValue(av);
+            logger::info("[EA]   skill {} = {:.1f}", static_cast<int>(av), val);
+            avo->SetBaseActorValue(av, 0.0f);
+        }
+        s_skillsNormalized = true;
+        logger::info("[EA] NormalizeSkills: all 18 skills set to 0 (one-time reset done).");
+    }
+
+    // Watches for RaceMenu closing on a new game and queues NormalizeSkills.
+    // s_awaitingCharCreate is set on kNewGame and is the primary guard against
+    // mid-game showracemenu calls. s_skillsNormalized is the secondary guard
+    // against re-entry on subsequent loads of the same character.
+    struct CharCreateWatcher : public RE::BSTEventSink<RE::MenuOpenCloseEvent> {
+        RE::BSEventNotifyControl ProcessEvent(
+            const RE::MenuOpenCloseEvent*              event,
+            RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
+        {
+            if (!EA::Config::resetSkillsOnNewGame) return RE::BSEventNotifyControl::kContinue;
+            if (!event) return RE::BSEventNotifyControl::kContinue;
+
+            // Support both vanilla ("RaceSex Menu") and modded ("RaceMenu") installs.
+            if (event->opening ||
+                (event->menuName != "RaceSex Menu" && event->menuName != "RaceMenu"))
+                return RE::BSEventNotifyControl::kContinue;
+
+            if (s_awaitingCharCreate && !s_skillsNormalized) {
+                s_awaitingCharCreate = false;
+                logger::info("[EA] RaceMenu closed on new game — queuing NormalizeSkills.");
+                // Chain two AddTask calls to defer normalization by 2 game frames,
+                // ensuring all post-RaceMenu race/attribute application is complete.
+                SKSE::GetTaskInterface()->AddTask([]() {
+                    SKSE::GetTaskInterface()->AddTask(NormalizeSkills);
+                });
+            }
+            return RE::BSEventNotifyControl::kContinue;
+        }
+    };
+    static CharCreateWatcher s_charCreateWatcher;
+
+    // -----------------------------------------------------------------------
     // Cosave callbacks
     // -----------------------------------------------------------------------
 
     constexpr std::uint32_t kEASaveID  = 'EAXP';
-    constexpr std::uint32_t kEAVersion = 3;  // v3: xp only (trackedLevel + pendingLevelUps removed)
+    constexpr std::uint32_t kEAVersion = 5;  // v5: xp + pendingSkillPoints + skillsNormalized
 
     void OnGameSave(SKSE::SerializationInterface* intfc) {
         if (!intfc->OpenRecord(kEASaveID, kEAVersion)) {
             logger::error("[EA] Cosave: Failed to open write record.");
             return;
         }
-        float xp = EA::XPManager::GetCurrentXP();
-        intfc->WriteRecordData(&xp, sizeof(xp));
-        logger::info("[EA] Cosave: Saved XP={:.1f}.", xp);
+        float         xp                = EA::XPManager::GetCurrentXP();
+        int           pendingSkillPoints = EA::XPManager::GetPendingSkillPoints();
+        std::uint8_t  normalized         = s_skillsNormalized ? 1u : 0u;
+        intfc->WriteRecordData(&xp,                sizeof(xp));
+        intfc->WriteRecordData(&pendingSkillPoints, sizeof(pendingSkillPoints));
+        intfc->WriteRecordData(&normalized,         sizeof(normalized));
+        logger::info("[EA] Cosave: Saved XP={:.1f}, pendingSkillPoints={}, skillsNormalized={}.",
+            xp, pendingSkillPoints, s_skillsNormalized);
     }
 
     void OnGameLoad(SKSE::SerializationInterface* intfc) {
         // Reset guards on every load — FormIDs from the previous session
         // are invalid in the new save's worldspace.
         EA::XPManager::ResetKillGuard();
+        EA::XPManager::ResetBookGuard();
         EA::XPManager::ResetQuestGuard();
 
         std::uint32_t type, version, length;
         while (intfc->GetNextRecordInfo(type, version, length)) {
             if (type == kEASaveID) {
-                float xp = 0.0f;
+                float xp               = 0.0f;
+                int   pendingSkillPts  = 0;
+
                 intfc->ReadRecordData(&xp, sizeof(xp));
-                // v1/v2 cosaves had additional fields (trackedLevel, pendingLevelUps)
-                // after xp — they are intentionally not read; the engine is now
-                // authoritative for level state.
+
+                if (version >= 4) {
+                    intfc->ReadRecordData(&pendingSkillPts, sizeof(pendingSkillPts));
+                }
+                // v1/v2/v3 cosaves: pendingSkillPoints defaults to 0 (no carry-over).
+
+                std::uint8_t normalized = 0u;
+                if (version >= 5) {
+                    intfc->ReadRecordData(&normalized, sizeof(normalized));
+                }
+                // v1–v4 cosaves: skillsNormalized defaults to false — first load will
+                // normalize skills if reset_skills_on_new_game is enabled.
 
                 EA::XPManager::SetCurrentXP(xp);
+                EA::XPManager::SetPendingSkillPoints(pendingSkillPts);
+                s_skillsNormalized = (normalized != 0u);
 
                 // Restore the XP into the engine's bucket and recalculate the
                 // threshold for the current level using our formula.
@@ -153,7 +249,8 @@ namespace {
                     }
                 }
 
-                logger::info("[EA] Cosave: Loaded XP={:.1f}.", xp);
+                logger::info("[EA] Cosave: Loaded XP={:.1f}, pendingSkillPoints={}, skillsNormalized={}.",
+                    xp, pendingSkillPts, s_skillsNormalized);
             } else {
                 logger::warn("[EA] Cosave: Unknown record {:#010x} — skipped.", type);
             }
@@ -162,8 +259,12 @@ namespace {
 
     void OnGameRevert(SKSE::SerializationInterface*) {
         EA::XPManager::SetCurrentXP(0.0f);
+        EA::XPManager::SetPendingSkillPoints(0);
         EA::XPManager::ResetKillGuard();
+        EA::XPManager::ResetBookGuard();
         EA::XPManager::ResetQuestGuard();
+        s_skillsNormalized   = false;
+        s_awaitingCharCreate = false;
         logger::info("[EA] Cosave: Reverted — all state reset.");
     }
 
@@ -173,6 +274,8 @@ namespace {
     void OnDataLoaded() {
         EA::SkillHook::Install();
         EA::EventSinks::Register();
+        EA::SkillMenu::Register();
+        logger::info("[EA] SkillMenu registered.");
 
         // Set vanilla leveling game settings to match our config curve.
         // The engine uses: threshold = fXPLevelUpBase + (level * fXPLevelUpMult)
@@ -192,6 +295,18 @@ namespace {
                 logger::info("[EA] OnDataLoaded: fXPLevelUpMult set to {:.1f}.", EA::Config::xpIncrease);
             } else {
                 logger::warn("[EA] OnDataLoaded: fXPLevelUpMult not found in GameSettingCollection.");
+            }
+            // Block character XP from skill rank-ups (skill books, trainers).
+            // When a skill ranks up the engine calls UseSkill() which awards
+            // newLevel * fXPPerSkillRank to skills->data->xp. Setting this to
+            // 0 makes every rank-up contribute 0 character XP so only our
+            // explicit AwardXP calls feed the level bucket.
+            auto* perRank = settings->GetSetting("fXPPerSkillRank");
+            if (perRank) {
+                perRank->data.f = 0.0f;
+                logger::info("[EA] OnDataLoaded: fXPPerSkillRank set to 0.0 (blocks skill-rank character XP).");
+            } else {
+                logger::warn("[EA] OnDataLoaded: fXPPerSkillRank not found — skill-book/trainer XP may leak.");
             }
         } else {
             logger::warn("[EA] OnDataLoaded: GameSettingCollection is null — leveling curve NOT applied.");
@@ -217,6 +332,15 @@ namespace {
             }
         }
 
+        // Register CharCreateWatcher unconditionally; ProcessEvent checks config flag at runtime.
+        auto* ui = RE::UI::GetSingleton();
+        if (ui) {
+            ui->AddEventSink(&s_charCreateWatcher);
+            logger::info("[EA] OnDataLoaded: CharCreateWatcher registered.");
+        } else {
+            logger::warn("[EA] OnDataLoaded: UI singleton null — CharCreateWatcher NOT registered.");
+        }
+
         logger::info("[EA] All systems initialised and ready.");
     }
 }
@@ -233,6 +357,15 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse) {
         if (msg->type == SKSE::MessagingInterface::kDataLoaded) {
             OnDataLoaded();
         }
+        if (msg->type == SKSE::MessagingInterface::kNewGame) {
+            // New character — arm the CharCreateWatcher to fire on RaceMenu close.
+            s_awaitingCharCreate = true;
+            s_skillsNormalized   = false;
+            logger::info("[EA] kNewGame: awaiting RaceMenu close to normalize skills.");
+        }
+        // kPostLoadGame: no skill-reset logic here.
+        // CharCreateWatcher fires before any save exists, so kPostLoadGame is
+        // not involved in the new-game skill reset path.
     });
 
     // Register cosave serialization

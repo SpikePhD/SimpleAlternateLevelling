@@ -1,5 +1,8 @@
 #pragma once
 
+#include <string>
+#include <unordered_map>
+
 namespace EA::Config {
 
     // -----------------------------------------------------------------------
@@ -10,6 +13,13 @@ namespace EA::Config {
     // Debug
     inline bool verbose     = false;
     inline int  maxLogFiles = 10;
+
+    // New game
+    inline bool resetSkillsOnNewGame = false;
+
+    // Notifications
+    inline bool notificationsEnabled = true;
+    inline std::unordered_map<std::string, std::string> notificationMessages{};
 
     // Quest XP
     inline float xpQuestMain     = 50.0f;
@@ -53,6 +63,23 @@ namespace EA::Config {
     inline float xpBase     = 200.0f;
     inline float xpIncrease =  25.0f;
     inline float xpCap      = 1000.0f;
+
+    // Skill allocation
+    inline int skillPointsPerLevel = 10;
+
+    // Skill menu UI layout (passed to SWF at runtime)
+    inline int menuPanelWidth     = 820;
+    inline int menuPanelHeight    = 0;
+    inline int menuPanelYOffset   = -90;
+    inline int menuSkillRowGap    = 36;
+    inline int menuSkillColumnGap = 22;
+    inline int menuSkillLabelValueGap = 4;
+    inline int menuSkillValueArrowGap = 2;
+    inline int menuSkillButtonTopGap = 18;
+    inline int menuSkillButtonRowOffset = 12;
+    inline int menuSkillButtonGap = 16;
+    inline int menuFontSize       = 13;
+    inline int menuHeaderFontSize = 16;
 
     // -----------------------------------------------------------------------
     // Loads config from JSON. Safe to call before game data is loaded.

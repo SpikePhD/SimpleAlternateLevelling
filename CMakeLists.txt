@@ -41,6 +41,7 @@ set(SOURCES
     src/Config.cpp
     src/XPManager.cpp
     src/SkillHook.cpp
+    src/SkillMenu.cpp
     src/EventSinks.cpp
 )
 
