@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <optional>
 #include <string_view>
 
@@ -66,6 +67,13 @@ namespace EA::XPManager {
 
     // Clears the quest guard set. Call on game load and new game.
     void ResetQuestGuard();
+
+    // Location discovery/clearing deduplication guards.
+    bool RegisterLocationDiscovery(std::uintptr_t markerKey);
+    void ResetLocationDiscoveryGuard();
+
+    bool RegisterLocationClear(RE::FormID locationID);
+    void ResetLocationClearGuard();
 
     // Pending skill points - unspent points from the last level-up's allocation
     // menu that carry over to the next level-up.

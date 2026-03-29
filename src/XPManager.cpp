@@ -12,6 +12,8 @@ namespace EA::XPManager {
     static std::unordered_set<RE::FormID> s_deadActors;
     static std::unordered_set<RE::FormID> s_readBooks;
     static std::unordered_set<RE::FormID> s_completedQuests;
+    static std::unordered_set<std::uintptr_t> s_discoveredLocationMarkers;
+    static std::unordered_set<RE::FormID>     s_clearedLocations;
 
     // -----------------------------------------------------------------------
     // Context builders
@@ -122,6 +124,41 @@ namespace EA::XPManager {
     void ResetQuestGuard() {
         s_completedQuests.clear();
         logger::info("[EA] Quest guard: cleared.");
+    }
+
+    bool RegisterLocationDiscovery(std::uintptr_t markerKey) {
+        if (markerKey == 0) {
+            return false;
+        }
+        if (s_discoveredLocationMarkers.contains(markerKey)) {
+            logger::debug("[EA] Location discovery guard: marker {:08X} already awarded - skipped.",
+                static_cast<unsigned long long>(markerKey));
+            return false;
+        }
+        s_discoveredLocationMarkers.insert(markerKey);
+        return true;
+    }
+
+    void ResetLocationDiscoveryGuard() {
+        s_discoveredLocationMarkers.clear();
+        logger::debug("[EA] Location discovery guard: cleared.");
+    }
+
+    bool RegisterLocationClear(RE::FormID locationID) {
+        if (locationID == 0) {
+            return false;
+        }
+        if (s_clearedLocations.contains(locationID)) {
+            logger::debug("[EA] Location clear guard: FormID {:08X} already awarded â€” skipped.", locationID);
+            return false;
+        }
+        s_clearedLocations.insert(locationID);
+        return true;
+    }
+
+    void ResetLocationClearGuard() {
+        s_clearedLocations.clear();
+        logger::debug("[EA] Location clear guard: cleared.");
     }
 
     // -----------------------------------------------------------------------

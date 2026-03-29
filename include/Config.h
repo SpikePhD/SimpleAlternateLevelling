@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <string_view>
 #include <unordered_map>
 
 namespace EA::Config {
@@ -23,11 +24,18 @@ namespace EA::Config {
 
     // Quest XP
     inline float xpQuestMain     = 50.0f;
+    inline float xpQuestCollege  = 50.0f;
+    inline float xpQuestThieves  = 50.0f;
+    inline float xpQuestBrotherhood = 50.0f;
+    inline float xpQuestCompanions = 50.0f;
     inline float xpQuestSide     = 50.0f;
     inline float xpQuestMisc     = 25.0f;
     inline float xpQuestFaction  = 50.0f;
     inline float xpQuestDaedric  = 50.0f;
     inline float xpQuestCivilWar = 50.0f;
+    inline float xpQuestDawnguard = 50.0f;
+    inline float xpQuestDragonborn = 50.0f;
+    inline float xpQuestObjectives = 10.0f;
     inline float xpQuestDLC      = 50.0f;
     inline float xpQuestOther    = 25.0f;
 
@@ -40,6 +48,7 @@ namespace EA::Config {
     inline float xpKillHumanoid        =  5.0f;
     inline float xpKillDefault         =  5.0f;
     inline float xpKillLevelScaleFactor =  1.0f;
+    inline float xpKillGlobalMultiplier = 1.0f;
 
     // Pickpocket XP
     inline float xpPickpocketBase      =  5.0f;
@@ -47,10 +56,15 @@ namespace EA::Config {
     // Book XP
     inline float xpBookNew       = 2.0f;
     inline float xpBookSkill     = 2.0f;
+    inline bool  bookUseValueReward = false;
+    inline float bookValueMultiplier = 1.0f;
+    inline float bookReadingMultiplier = 1.0f;
 
     // Location XP
     inline float xpLocationDiscovered = 10.0f;
     inline float xpLocationCleared    = 15.0f;
+    inline std::unordered_map<std::string, float> locationDiscoveryRewards{};
+    inline std::unordered_map<std::string, float> locationClearingRewards{};
 
     // Lockpick XP
     inline float xpLockNovice     = 2.0f;
@@ -81,6 +95,15 @@ namespace EA::Config {
     inline int menuSkillButtonGap = 16;
     inline int menuFontSize       = 13;
     inline int menuHeaderFontSize = 16;
+
+    inline float GetReward(
+        const std::unordered_map<std::string, float>& rewards,
+        std::string_view                              key,
+        float                                         fallback)
+    {
+        const auto it = rewards.find(std::string(key));
+        return it != rewards.end() ? it->second : fallback;
+    }
 
     // -----------------------------------------------------------------------
     // Loads config from JSON. Safe to call before game data is loaded.

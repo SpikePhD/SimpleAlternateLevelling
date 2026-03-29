@@ -100,11 +100,18 @@ namespace EA::Config {
 
         // Quest XP
         xpQuestMain     = ReadFloat(j, {"xp_sources", "quest", "main"},      xpQuestMain);
+        xpQuestCollege  = ReadFloat(j, {"xp_sources", "quest", "college"},   xpQuestFaction);
+        xpQuestThieves  = ReadFloat(j, {"xp_sources", "quest", "thieves"},   xpQuestFaction);
+        xpQuestBrotherhood = ReadFloat(j, {"xp_sources", "quest", "brotherhood"}, xpQuestFaction);
+        xpQuestCompanions = ReadFloat(j, {"xp_sources", "quest", "companions"}, xpQuestFaction);
         xpQuestSide     = ReadFloat(j, {"xp_sources", "quest", "side"},      xpQuestSide);
         xpQuestMisc     = ReadFloat(j, {"xp_sources", "quest", "misc"},      xpQuestMisc);
         xpQuestFaction  = ReadFloat(j, {"xp_sources", "quest", "faction"},   xpQuestFaction);
         xpQuestDaedric  = ReadFloat(j, {"xp_sources", "quest", "daedric"},   xpQuestDaedric);
         xpQuestCivilWar = ReadFloat(j, {"xp_sources", "quest", "civil_war"}, xpQuestCivilWar);
+        xpQuestDawnguard = ReadFloat(j, {"xp_sources", "quest", "dawnguard"}, xpQuestDLC);
+        xpQuestDragonborn = ReadFloat(j, {"xp_sources", "quest", "dragonborn"}, xpQuestDLC);
+        xpQuestObjectives = ReadFloat(j, {"xp_sources", "quest", "objectives"}, xpQuestMisc);
         xpQuestDLC      = ReadFloat(j, {"xp_sources", "quest", "dlc"},       xpQuestDLC);
         xpQuestOther    = ReadFloat(j, {"xp_sources", "quest", "other"},     xpQuestOther);
 
@@ -117,6 +124,7 @@ namespace EA::Config {
         xpKillHumanoid        = ReadFloat(j, {"xp_sources", "kill", "base_humanoid"},      xpKillHumanoid);
         xpKillDefault         = ReadFloat(j, {"xp_sources", "kill", "base_default"},       xpKillDefault);
         xpKillLevelScaleFactor = ReadFloat(j, {"xp_sources", "kill", "level_scale_factor"}, xpKillLevelScaleFactor);
+        xpKillGlobalMultiplier = ReadFloat(j, {"xp_sources", "kill", "global_multiplier"}, xpKillGlobalMultiplier);
 
         // Pickpocket XP
         xpPickpocketBase = ReadFloat(j, {"xp_sources", "pickpocket", "base"}, xpPickpocketBase);
@@ -124,10 +132,52 @@ namespace EA::Config {
         // Book XP
         xpBookNew   = ReadFloat(j, {"xp_sources", "book", "new_book"},   xpBookNew);
         xpBookSkill = ReadFloat(j, {"xp_sources", "book", "skill_book"}, xpBookSkill);
+        bookUseValueReward = ReadBool(j, {"xp_sources", "book", "use_value_reward"}, bookUseValueReward);
+        bookValueMultiplier = ReadFloat(j, {"xp_sources", "book", "value_multiplier"}, bookValueMultiplier);
+        bookReadingMultiplier = ReadFloat(j, {"xp_sources", "book", "reading_multiplier"}, bookReadingMultiplier);
 
         // Location XP
         xpLocationDiscovered = ReadFloat(j, {"xp_sources", "location", "discovered"}, xpLocationDiscovered);
         xpLocationCleared    = ReadFloat(j, {"xp_sources", "location", "cleared"},    xpLocationCleared);
+
+        locationDiscoveryRewards.clear();
+        locationClearingRewards.clear();
+        const std::pair<std::string_view, float> discoveryDefaults[] = {
+            {"city", xpLocationDiscovered}, {"town", xpLocationDiscovered}, {"settlement", xpLocationDiscovered},
+            {"cave", xpLocationDiscovered}, {"camp", xpLocationDiscovered}, {"fort", xpLocationDiscovered},
+            {"nordic_ruin", xpLocationDiscovered}, {"dwemer_ruin", xpLocationDiscovered}, {"shipwreck", xpLocationDiscovered},
+            {"grove", xpLocationDiscovered}, {"landmark", xpLocationDiscovered}, {"dragon_lair", xpLocationDiscovered},
+            {"farm", xpLocationDiscovered}, {"wood_mill", xpLocationDiscovered}, {"mine", xpLocationDiscovered},
+            {"military_camp", xpLocationDiscovered}, {"doomstone", xpLocationDiscovered}, {"wheat_mill", xpLocationDiscovered},
+            {"smelter", xpLocationDiscovered}, {"stable", xpLocationDiscovered}, {"imperial_tower", xpLocationDiscovered},
+            {"clearing", xpLocationDiscovered}, {"pass", xpLocationDiscovered}, {"altar", xpLocationDiscovered},
+            {"rock", xpLocationDiscovered}, {"lighthouse", xpLocationDiscovered}, {"orc_stronghold", xpLocationDiscovered},
+            {"giant_camp", xpLocationDiscovered}, {"shack", xpLocationDiscovered}, {"nordic_tower", xpLocationDiscovered},
+            {"nordic_dwelling", xpLocationDiscovered}, {"docks", xpLocationDiscovered}, {"daedric_shrine", xpLocationDiscovered},
+            {"castle", xpLocationDiscovered}, {"default", xpLocationDiscovered}
+        };
+        const std::pair<std::string_view, float> clearingDefaults[] = {
+            {"city", xpLocationCleared}, {"town", xpLocationCleared}, {"settlement", xpLocationCleared},
+            {"cave", xpLocationCleared}, {"camp", xpLocationCleared}, {"fort", xpLocationCleared},
+            {"nordic_ruin", xpLocationCleared}, {"dwemer_ruin", xpLocationCleared}, {"shipwreck", xpLocationCleared},
+            {"grove", xpLocationCleared}, {"landmark", xpLocationCleared}, {"dragon_lair", xpLocationCleared},
+            {"farm", xpLocationCleared}, {"wood_mill", xpLocationCleared}, {"mine", xpLocationCleared},
+            {"military_camp", xpLocationCleared}, {"doomstone", xpLocationCleared}, {"wheat_mill", xpLocationCleared},
+            {"smelter", xpLocationCleared}, {"stable", xpLocationCleared}, {"imperial_tower", xpLocationCleared},
+            {"clearing", xpLocationCleared}, {"pass", xpLocationCleared}, {"altar", xpLocationCleared},
+            {"rock", xpLocationCleared}, {"lighthouse", xpLocationCleared}, {"orc_stronghold", xpLocationCleared},
+            {"giant_camp", xpLocationCleared}, {"shack", xpLocationCleared}, {"nordic_tower", xpLocationCleared},
+            {"nordic_dwelling", xpLocationCleared}, {"docks", xpLocationCleared}, {"daedric_shrine", xpLocationCleared},
+            {"castle", xpLocationCleared}, {"default", xpLocationCleared}
+        };
+        for (const auto& [key, def] : discoveryDefaults) {
+            locationDiscoveryRewards.emplace(std::string(key),
+                ReadFloat(j, {"xp_sources", "location", "discovery", std::string(key)}, def));
+        }
+        for (const auto& [key, def] : clearingDefaults) {
+            locationClearingRewards.emplace(std::string(key),
+                ReadFloat(j, {"xp_sources", "location", "clearing", std::string(key)}, def));
+        }
 
         // Lockpick XP
         xpLockNovice     = ReadFloat(j, {"xp_sources", "lockpick", "novice"},     xpLockNovice);
@@ -177,12 +227,18 @@ namespace EA::Config {
         loadMsg("kill_humanoid",       "Victory in combat");
         loadMsg("kill_default",        "An enemy is defeated");
         loadMsg("quest_main",          "Your destiny unfolds");
+        loadMsg("quest_college",       "Arcane knowledge advanced");
+        loadMsg("quest_thieves",       "A shadowed contract concludes");
+        loadMsg("quest_brotherhood",   "Silence is rewarded");
+        loadMsg("quest_companions",    "Strength is earned");
         loadMsg("quest_side",          "Another soul aided");
         loadMsg("quest_misc",          "Task complete");
         loadMsg("quest_faction",       "Honour to your faction");
         loadMsg("quest_daedric",       "Daedric favour earned");
         loadMsg("quest_civil_war",     "For Skyrim");
-        loadMsg("quest_dlc",           "A new chapter");
+        loadMsg("quest_dawnguard",     "The night shifts");
+        loadMsg("quest_dragonborn",    "A new chapter");
+        loadMsg("quest_objectives",    "Objective complete");
         loadMsg("quest_other",         "Quest complete");
         loadMsg("location_discovered", "A new place discovered");
         loadMsg("location_cleared",    "This place is yours now");
@@ -205,7 +261,8 @@ namespace EA::Config {
             xpKillDragon, xpKillDaedra, xpKillUndead, xpKillAnimal,
             xpKillCreature, xpKillHumanoid, xpKillDefault, xpKillLevelScaleFactor);
         logger::info("[EA] Config: Pickpocket XP — base={:.1f}", xpPickpocketBase);
-        logger::info("[EA] Config: Book XP — new={:.1f}, skill={:.1f}", xpBookNew, xpBookSkill);
+        logger::info("[EA] Config: Book XP — new={:.1f}, skill={:.1f}, reading_mult={:.2f}, value_mode={}",
+            xpBookNew, xpBookSkill, bookReadingMultiplier, bookUseValueReward);
         logger::info("[EA] Config: Location XP — discovered={:.1f}, cleared={:.1f}", xpLocationDiscovered, xpLocationCleared);
         logger::info("[EA] Config: Lock XP — novice={:.1f}, apprentice={:.1f}, adept={:.1f}, expert={:.1f}, master={:.1f}",
             xpLockNovice, xpLockApprentice, xpLockAdept, xpLockExpert, xpLockMaster);

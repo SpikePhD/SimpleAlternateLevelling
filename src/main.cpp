@@ -278,6 +278,8 @@ namespace {
         EA::XPManager::ResetKillGuard();
         EA::XPManager::ResetBookGuard();
         EA::XPManager::ResetQuestGuard();
+        EA::XPManager::ResetLocationDiscoveryGuard();
+        EA::XPManager::ResetLocationClearGuard();
 
         std::uint32_t type, version, length;
         while (intfc->GetNextRecordInfo(type, version, length)) {
@@ -333,6 +335,8 @@ namespace {
         EA::XPManager::ResetKillGuard();
         EA::XPManager::ResetBookGuard();
         EA::XPManager::ResetQuestGuard();
+        EA::XPManager::ResetLocationDiscoveryGuard();
+        EA::XPManager::ResetLocationClearGuard();
         s_skillsNormalized   = false;
         s_awaitingCharCreate = false;
         logger::info("[EA] Cosave: Reverted — all state reset.");
