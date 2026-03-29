@@ -1,4 +1,4 @@
-# Experience and Attributes — AGENTS.md
+# Simple Alternate Levelling — AGENTS.md
 
 ## What this mod does
 
@@ -12,7 +12,7 @@ grinding individual skills. Skill XP is intercepted and discarded at the engine 
 ```
 SKSEPluginLoad()
 ├── InitializeLog()          — timestamped spdlog, mirrored to Logs/ + SKSE/Spike/
-├── Config::Load()           — reads ExperienceAndAttributes.json immediately
+├── Config::Load()           — reads SimpleAlternateLevelling.json immediately
 ├── Serialization callbacks  — cosave v3: persists s_currentXP across saves
 └── MessagingInterface kDataLoaded
     ├── SkillHook::Install()          — trampolines into PlayerCharacter::AddSkillExperience
@@ -39,7 +39,7 @@ SKSEPluginLoad()
 | `src/SkillHook.cpp` / `include/SkillHook.h` | `write_branch<5>` hooks: AddSkillExperience (discard), TESObjectBOOK::Read (book XP) |
 | `src/EventSinks.cpp` / `include/EventSinks.h` | All BSTEventSink structs + `Register()` |
 | `include/PCH.h` | Precompiled header — RE/Skyrim.h, SKSE, spdlog sinks, std includes |
-| `data/SKSE/Plugins/ExperienceAndAttributes.json` | Runtime config (XP values, leveling curve, debug flags) |
+| `data/SKSE/Plugins/SimpleAlternateLevelling.json` | Runtime config (XP values, leveling curve, debug flags) |
 
 ### XP flow
 
@@ -109,13 +109,13 @@ cmake -B build -S . \
   "-DCMAKE_TOOLCHAIN_FILE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/vcpkg/scripts/buildsystems/vcpkg.cmake" \
   -DVCPKG_TARGET_TRIPLET=x64-windows \
   -DCMAKE_BUILD_TYPE=Release \
-  "-DSKYRIM_PATH=C:/Modlist/NGVO/mods/Experience and Attributes" \
+  "-DSKYRIM_PATH=C:/Modlist/NGVO/mods/Simple Alternate Levelling" \
   -DBUILD_TESTS=OFF
 
 cmake --build build --config Release
 ```
 
-DLL is auto-copied to `C:\Modlist\NGVO\mods\Experience and Attributes\SKSE\Plugins\`
+DLL is auto-copied to `C:\Modlist\NGVO\mods\Simple Alternate Levelling\SKSE\Plugins\`
 on a successful build (CMake post-build step).
 
 **CRITICAL**: `CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"` must be
@@ -129,11 +129,11 @@ Use triplet `x64-windows` (not `x64-windows-static` — causes LNK2038 mismatch 
 | Thing | Path |
 |---|---|
 | Source | `C:\Users\lucac\Documents\MyProjects\Experience and Attributes\` |
-| Build output | `build\Release\ExperienceAndAttributes.dll` |
-| Deploy target | `C:\Modlist\NGVO\mods\Experience and Attributes\SKSE\Plugins\` |
-| SKSE log (game) | `Documents\My Games\Skyrim Special Edition\SKSE\Spike\ExperienceAndAttributes_<ts>.log` |
-| Dev log mirror | `<project root>\Logs\ExperienceAndAttributes_<ts>.log` |
-| Config (game) | `<Skyrim>\Data\SKSE\Plugins\ExperienceAndAttributes.json` |
+| Build output | `build\Release\SimpleAlternateLevelling.dll` |
+| Deploy target | `C:\Modlist\NGVO\mods\Simple Alternate Levelling\SKSE\Plugins\` |
+| SKSE log (game) | `Documents\My Games\Skyrim Special Edition\SKSE\Spike\SimpleAlternateLevelling_<ts>.log` |
+| Dev log mirror | `<project root>\Logs\SimpleAlternateLevelling_<ts>.log` |
+| Config (game) | `<Skyrim>\Data\SKSE\Plugins\SimpleAlternateLevelling.json` |
 
 ## Environment — tools in PATH
 
@@ -165,7 +165,7 @@ These are launched through MO2 so they see the virtual data folder:
 | **PGPatcher / PCA** | `tools\PGPatcher\`, `tools\PCA\` | Particle/physics patchers |
 
 ## Json for testing
-Make sure that the deployed config JSON at "C:\Modlist\NGVO\mods\Experience and Attributes\SKSE\Plugins\ExperienceAndAttributes.json" has the following:
+Make sure that the deployed config JSON at "C:\Modlist\NGVO\mods\Simple Alternate Levelling\SKSE\Plugins\SimpleAlternateLevelling.json" has the following:
 Verbose = true 
   ## This is to enable better logging and diagnosis of eventual issues
  "leveling": {
