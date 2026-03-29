@@ -63,7 +63,7 @@ namespace {
 
         // Mirror sink: project Logs folder for direct access during development
         auto projectLogDir = std::filesystem::path(
-            "C:/Users/lucac/Documents/MyProjects/Experience and Attributes/Logs");
+            "C:/Users/lucac/Documents/MyProjects/Simple Alternate Levelling/Logs");
         std::filesystem::create_directories(projectLogDir);
         auto projectLogPath = projectLogDir / logFilename;
 
