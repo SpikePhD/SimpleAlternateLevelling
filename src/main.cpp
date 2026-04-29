@@ -61,11 +61,12 @@ namespace {
         auto logFilename = std::format("SimpleAlternateLevelling_{}.log", ts.str());
         auto logPath     = spikeDir / logFilename;
 
-        // Mirror sink: project Logs folder for direct access during development
-        auto projectLogDir = std::filesystem::path(
-            "C:/Users/lucac/Documents/MyProjects/Simple Alternate Levelling/Logs");
-        std::filesystem::create_directories(projectLogDir);
-        auto projectLogPath = projectLogDir / logFilename;
+        // Mirror sink: DLL directory for direct access during development
+        // This places logs next to the plugin DLL, making them easy to find
+        auto dllDir = GetPluginsDir();
+        auto devLogDir = dllDir / "Logs";
+        std::filesystem::create_directories(devLogDir);
+        auto projectLogPath = devLogDir / logFilename;
 
         // Combine both sinks into a dist_sink
         auto sink1    = std::make_shared<spdlog::sinks::basic_file_sink_mt>(logPath.string(),        true);
@@ -101,7 +102,7 @@ namespace {
             }
         };
         rotateDir(spikeDir);
-        rotateDir(projectLogDir);
+        rotateDir(devLogDir);
     }
 
     // -----------------------------------------------------------------------
@@ -207,7 +208,7 @@ namespace {
             }
 
             s_awaitingCharCreate = false;
-            logger::info("[EA] RaceSex/RaceMenu closed on new game â€” normalizing skills now.");
+            logger::info("[EA] RaceSex/RaceMenu closed on new game — normalizing skills now.");
             NormalizeSkills();
         });
     }

@@ -100,18 +100,18 @@ namespace EA::Config {
 
         // Quest XP
         xpQuestMain     = ReadFloat(j, {"xp_sources", "quest", "main"},      xpQuestMain);
-        xpQuestCollege  = ReadFloat(j, {"xp_sources", "quest", "college"},   xpQuestFaction);
-        xpQuestThieves  = ReadFloat(j, {"xp_sources", "quest", "thieves"},   xpQuestFaction);
-        xpQuestBrotherhood = ReadFloat(j, {"xp_sources", "quest", "brotherhood"}, xpQuestFaction);
-        xpQuestCompanions = ReadFloat(j, {"xp_sources", "quest", "companions"}, xpQuestFaction);
+        xpQuestCollege  = ReadFloat(j, {"xp_sources", "quest", "college"},   xpQuestCollege);
+        xpQuestThieves  = ReadFloat(j, {"xp_sources", "quest", "thieves"},   xpQuestThieves);
+        xpQuestBrotherhood = ReadFloat(j, {"xp_sources", "quest", "brotherhood"}, xpQuestBrotherhood);
+        xpQuestCompanions = ReadFloat(j, {"xp_sources", "quest", "companions"}, xpQuestCompanions);
         xpQuestSide     = ReadFloat(j, {"xp_sources", "quest", "side"},      xpQuestSide);
         xpQuestMisc     = ReadFloat(j, {"xp_sources", "quest", "misc"},      xpQuestMisc);
         xpQuestFaction  = ReadFloat(j, {"xp_sources", "quest", "faction"},   xpQuestFaction);
         xpQuestDaedric  = ReadFloat(j, {"xp_sources", "quest", "daedric"},   xpQuestDaedric);
         xpQuestCivilWar = ReadFloat(j, {"xp_sources", "quest", "civil_war"}, xpQuestCivilWar);
-        xpQuestDawnguard = ReadFloat(j, {"xp_sources", "quest", "dawnguard"}, xpQuestDLC);
-        xpQuestDragonborn = ReadFloat(j, {"xp_sources", "quest", "dragonborn"}, xpQuestDLC);
-        xpQuestObjectives = ReadFloat(j, {"xp_sources", "quest", "objectives"}, xpQuestMisc);
+        xpQuestDawnguard = ReadFloat(j, {"xp_sources", "quest", "dawnguard"}, xpQuestDawnguard);
+        xpQuestDragonborn = ReadFloat(j, {"xp_sources", "quest", "dragonborn"}, xpQuestDragonborn);
+        xpQuestObjectives = ReadFloat(j, {"xp_sources", "quest", "objectives"}, xpQuestObjectives);
         xpQuestDLC      = ReadFloat(j, {"xp_sources", "quest", "dlc"},       xpQuestDLC);
         xpQuestOther    = ReadFloat(j, {"xp_sources", "quest", "other"},     xpQuestOther);
 
@@ -272,7 +272,7 @@ namespace EA::Config {
             skillPointsPerLevel, menuPanelWidth, menuPanelHeight, menuPanelYOffset,
             menuSkillRowGap, menuSkillColumnGap, menuSkillLabelValueGap, menuSkillValueArrowGap,
             menuSkillButtonTopGap, menuSkillButtonGap, menuFontSize, menuHeaderFontSize);
-        logger::info("[EA] Config: Skill cap â€” {:.1f}", skillCap);
+        logger::info("[EA] Config: Skill cap — {:.1f}", skillCap);
         logger::info("[EA] Config: max_log_files={}", maxLogFiles);
         logger::info("[EA] Config: notifications_enabled={}", notificationsEnabled);
         logger::info("[EA] Config: reset_skills_on_new_game={}", resetSkillsOnNewGame);

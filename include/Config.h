@@ -23,7 +23,7 @@ namespace EA::Config {
     inline std::unordered_map<std::string, std::string> notificationMessages{};
 
     // Quest XP
-    inline float xpQuestMain     = 50.0f;
+    inline float xpQuestMain     = 75.0f;
     inline float xpQuestCollege  = 50.0f;
     inline float xpQuestThieves  = 50.0f;
     inline float xpQuestBrotherhood = 50.0f;
@@ -31,10 +31,10 @@ namespace EA::Config {
     inline float xpQuestSide     = 50.0f;
     inline float xpQuestMisc     = 25.0f;
     inline float xpQuestFaction  = 50.0f;
-    inline float xpQuestDaedric  = 50.0f;
-    inline float xpQuestCivilWar = 50.0f;
+    inline float xpQuestDaedric  = 75.0f;
+    inline float xpQuestCivilWar = 75.0f;
     inline float xpQuestDawnguard = 50.0f;
-    inline float xpQuestDragonborn = 50.0f;
+    inline float xpQuestDragonborn = 75.0f;
     inline float xpQuestObjectives = 10.0f;
     inline float xpQuestDLC      = 50.0f;
     inline float xpQuestOther    = 25.0f;
@@ -74,9 +74,9 @@ namespace EA::Config {
     inline float xpLockMaster     = 6.0f;
 
     // Leveling curve
-    inline float xpBase     = 200.0f;
-    inline float xpIncrease =  25.0f;
-    inline float xpCap      = 1000.0f;
+    inline float xpBase     = 5.0f;
+    inline float xpIncrease = 1.0f;
+    inline float xpCap      = 500.0f;
 
     // Skill allocation
     inline int skillPointsPerLevel = 10;

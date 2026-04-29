@@ -75,7 +75,7 @@ namespace EA::XPManager {
     // -----------------------------------------------------------------------
     bool RegisterKill(RE::FormID actorID) {
         if (s_deadActors.contains(actorID)) {
-            logger::debug("[EA] Kill guard: FormID {:08X} already dead â€” skipped.", actorID);
+            logger::debug("[EA] Kill guard: FormID {:08X} already dead — skipped.", actorID);
             return false;
         }
         s_deadActors.insert(actorID);
@@ -92,7 +92,7 @@ namespace EA::XPManager {
     // -----------------------------------------------------------------------
     bool RegisterBookRead(RE::FormID bookID) {
         if (s_readBooks.contains(bookID)) {
-            logger::debug("[EA] Book guard: FormID {:08X} already awarded XP Ã¢â‚¬â€ skipped.", bookID);
+            logger::debug("[EA] Book guard: FormID {:08X} already awarded XP — skipped.", bookID);
             return false;
         }
         s_readBooks.insert(bookID);
@@ -109,7 +109,7 @@ namespace EA::XPManager {
     // -----------------------------------------------------------------------
     bool RegisterQuestXP(RE::FormID questID) {
         if (s_completedQuests.contains(questID)) {
-            logger::debug("[EA] Quest guard: FormID {:08X} already awarded XP â€” skipped.", questID);
+            logger::debug("[EA] Quest guard: FormID {:08X} already awarded XP — skipped.", questID);
             return false;
         }
         s_completedQuests.insert(questID);
@@ -149,7 +149,7 @@ namespace EA::XPManager {
             return false;
         }
         if (s_clearedLocations.contains(locationID)) {
-            logger::debug("[EA] Location clear guard: FormID {:08X} already awarded â€” skipped.", locationID);
+            logger::debug("[EA] Location clear guard: FormID {:08X} already awarded — skipped.", locationID);
             return false;
         }
         s_clearedLocations.insert(locationID);

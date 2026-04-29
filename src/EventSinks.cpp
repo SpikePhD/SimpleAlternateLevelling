@@ -2,7 +2,6 @@
 #include "EventSinks.h"
 #include "XPManager.h"
 #include "Config.h"
-#include "RE/B/BooksRead.h"
 #include "RE/E/ExtraMapMarker.h"
 #include "RE/L/LocationCleared.h"
 #include "RE/L/LocationDiscovery.h"
@@ -181,45 +180,9 @@ namespace EA::EventSinks {
         }
     }
 
-    struct OnBookRead : public RE::BSTEventSink<RE::BooksRead::Event> {
-        RE::BSEventNotifyControl ProcessEvent(
-            const RE::BooksRead::Event* event,
-            RE::BSTEventSource<RE::BooksRead::Event>*) override
-        {
-            if (!event || !event->book) {
-                return RE::BSEventNotifyControl::kContinue;
-            }
-
-            auto* book = event->book;
-            auto  formID = book->GetFormID();
-            auto  title = book->GetFullName();
-            bool  alreadyRead = book->IsRead();
-            bool  skillBook = event->skillBook;
-
-            if (!XPManager::RegisterBookRead(formID)) {
-                logger::debug("[EA] Book guard: duplicate event for '{}' (FormID={:08X}) skillBook={} alreadyRead={} â€” skipped.",
-                    title, formID, skillBook, alreadyRead);
-                return RE::BSEventNotifyControl::kContinue;
-            }
-
-            float xp = Config::xpBookNew;
-            if (skillBook) {
-                xp = Config::xpBookSkill;
-            } else if (Config::bookUseValueReward) {
-                xp = static_cast<float>(std::max(1, book->GetGoldValue())) * Config::bookValueMultiplier;
-            }
-
-            xp *= Config::bookReadingMultiplier;
-
-            XPManager::AwardXP(
-                xp,
-                XPManager::MakeBookContext(title, formID, skillBook, alreadyRead));
-            return RE::BSEventNotifyControl::kContinue;
-        }
-    };
 
     // -----------------------------------------------------------------------
-    // PRIMARY SINK â€” TESTrackedStatsEvent
+    // PRIMARY SINK — TESTrackedStatsEvent
     // -----------------------------------------------------------------------
     struct OnLocationDiscovery : public RE::BSTEventSink<RE::LocationDiscovery::Event> {
         RE::BSEventNotifyControl ProcessEvent(
@@ -385,7 +348,7 @@ namespace EA::EventSinks {
     };
 
     // -----------------------------------------------------------------------
-    // KILL SINK â€” TESDeathEvent
+    // KILL SINK — TESDeathEvent
     // -----------------------------------------------------------------------
     struct OnActorKill : public RE::BSTEventSink<RE::TESDeathEvent> {
         RE::BSEventNotifyControl ProcessEvent(
@@ -436,7 +399,7 @@ namespace EA::EventSinks {
     };
 
     // -----------------------------------------------------------------------
-    // QUEST SINK â€” TESQuestStageEvent
+    // QUEST SINK — TESQuestStageEvent
     // -----------------------------------------------------------------------
     struct OnQuestStage : public RE::BSTEventSink<RE::TESQuestStageEvent> {
         RE::BSEventNotifyControl ProcessEvent(
@@ -516,7 +479,6 @@ namespace EA::EventSinks {
     // -----------------------------------------------------------------------
     // Static instances
     // -----------------------------------------------------------------------
-    static OnBookRead     s_bookReadSink;
     static OnLocationDiscovery s_locationDiscoverySink;
     static OnLocationCleared   s_locationClearedSink;
     static OnTrackedStats s_trackedStatsSink;
@@ -533,18 +495,12 @@ namespace EA::EventSinks {
 
         logger::info("[EA] EventSinks: Registering sinks...");
 
-        auto* bookSrc = RE::BooksRead::GetEventSource();
-        if (bookSrc) {
-            bookSrc->AddEventSink(&s_bookReadSink);
-            logger::info("[EA] EventSinks: [1/7] BooksRead event sink registered.");
-        } else {
-            logger::error("[EA] EventSinks: BooksRead event source is null.");
         }
 
         auto* discoverySrc = RE::LocationDiscovery::GetEventSource();
         if (discoverySrc) {
             discoverySrc->AddEventSink(&s_locationDiscoverySink);
-            logger::info("[EA] EventSinks: [2/7] LocationDiscovery event sink registered.");
+            logger::info("[EA] EventSinks: [1/6] LocationDiscovery event sink registered.");
         } else {
             logger::error("[EA] EventSinks: LocationDiscovery event source is null.");
         }
@@ -552,31 +508,31 @@ namespace EA::EventSinks {
         auto* clearedSrc = RE::LocationCleared::GetEventSource();
         if (clearedSrc) {
             clearedSrc->AddEventSink(&s_locationClearedSink);
-            logger::info("[EA] EventSinks: [3/7] LocationCleared event sink registered.");
+            logger::info("[EA] EventSinks: [2/6] LocationCleared event sink registered.");
         } else {
             logger::error("[EA] EventSinks: LocationCleared event source is null.");
         }
 
         src->GetEventSource<RE::TESTrackedStatsEvent>()->AddEventSink(&s_trackedStatsSink);
-        logger::info("[EA] EventSinks: [4/7] TESTrackedStatsEvent registered.");
+        logger::info("[EA] EventSinks: [3/6] TESTrackedStatsEvent registered.");
 
         src->GetEventSource<RE::TESDeathEvent>()->AddEventSink(&s_killSink);
-        logger::info("[EA] EventSinks: [5/7] TESDeathEvent (kill) registered.");
+        logger::info("[EA] EventSinks: [4/6] TESDeathEvent (kill) registered.");
 
         src->GetEventSource<RE::TESQuestStageEvent>()->AddEventSink(&s_questSink);
-        logger::info("[EA] EventSinks: [6/7] TESQuestStageEvent registered.");
+        logger::info("[EA] EventSinks: [5/6] TESQuestStageEvent registered.");
 
         src->GetEventSource<RE::TESLockChangedEvent>()->AddEventSink(&s_lockChangedSink);
-        logger::info("[EA] EventSinks: [7/7] TESLockChangedEvent (lock level cache) registered.");
+        logger::info("[EA] EventSinks: [6/6] TESLockChangedEvent (lock level cache) registered.");
 
-        logger::warn("[EA] EventSinks: TESActorValueChangeEvent sink SKIPPED â€” "
+        logger::warn("[EA] EventSinks: TESActorValueChangeEvent sink SKIPPED — "
                      "struct not defined in this CommonLibSSE-NG build. "
                      "Attribute selection will not be logged.");
 
-        logger::warn("[EA] EventSinks: TESPerkEntryRunEvent sink SKIPPED â€” "
+        logger::warn("[EA] EventSinks: TESPerkEntryRunEvent sink SKIPPED — "
                      "struct forward-declared only, no field definitions available. "
                      "Perk selection will not be logged.");
 
-        logger::info("[EA] EventSinks: All sinks registered (7/7 active, 2/2 diagnostic sinks skipped).");
+        logger::info("[EA] EventSinks: All sinks registered (6/6 active, 2/2 diagnostic sinks skipped).");
     }
 }
