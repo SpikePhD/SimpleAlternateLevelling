@@ -3,6 +3,7 @@
   "name": "simplealternatelevelling",
   "version": "0.1.0",
   "dependencies": [
+    "directxtk",
     "nlohmann-json",
     "rapidcsv",
     "spdlog",

@@ -1,19 +1,31 @@
 #include "PCH.h"
 #include "XPManager.h"
 #include "Config.h"
+#include "RewardRules.h"
+
+#include <cmath>
 
 namespace EA::XPManager {
+
+    namespace {
+        void ShowXPNotification(const char* a_message)
+        {
+            using NotificationFn = void (*)(const char*, const char*, bool);
+            static REL::Relocation<NotificationFn> notify{ RELOCATION_ID(52050, 52933) };
+            notify(a_message, nullptr, true);
+        }
+    }
 
     // -----------------------------------------------------------------------
     // State
     // -----------------------------------------------------------------------
-    static float                          s_currentXP          = 0.0f;
     static int                            s_pendingSkillPoints = 0;
     static std::unordered_set<RE::FormID> s_deadActors;
     static std::unordered_set<RE::FormID> s_readBooks;
-    static std::unordered_set<RE::FormID> s_completedQuests;
+    static RewardRules::QuestLifecycle    s_questLifecycle;
     static std::unordered_set<std::uintptr_t> s_discoveredLocationMarkers;
     static std::unordered_set<RE::FormID>     s_clearedLocations;
+    static std::uint64_t                       s_rewardGeneration = 1;
 
     // -----------------------------------------------------------------------
     // Context builders
@@ -62,11 +74,8 @@ namespace EA::XPManager {
     }
 
     // -----------------------------------------------------------------------
-    // Cosave accessors
+    // Cosave accessors for plugin-owned state
     // -----------------------------------------------------------------------
-    float GetCurrentXP()         { return s_currentXP; }
-    void  SetCurrentXP(float xp) { s_currentXP = xp; }
-
     int  GetPendingSkillPoints()      { return s_pendingSkillPoints; }
     void SetPendingSkillPoints(int n) { s_pendingSkillPoints = n; }
 
@@ -75,16 +84,11 @@ namespace EA::XPManager {
     // -----------------------------------------------------------------------
     bool RegisterKill(RE::FormID actorID) {
         if (s_deadActors.contains(actorID)) {
-            logger::debug("[EA] Kill guard: FormID {:08X} already dead — skipped.", actorID);
+            logger::debug("[EA] Kill guard: FormID {:08X} already dead - skipped.", actorID);
             return false;
         }
         s_deadActors.insert(actorID);
         return true;
-    }
-
-    void ResetKillGuard() {
-        s_deadActors.clear();
-        logger::debug("[EA] Kill guard: cleared.");
     }
 
     // -----------------------------------------------------------------------
@@ -92,38 +96,18 @@ namespace EA::XPManager {
     // -----------------------------------------------------------------------
     bool RegisterBookRead(RE::FormID bookID) {
         if (s_readBooks.contains(bookID)) {
-            logger::debug("[EA] Book guard: FormID {:08X} already awarded XP — skipped.", bookID);
+            logger::debug("[EA] Book guard: FormID {:08X} already awarded XP - skipped.", bookID);
             return false;
         }
         s_readBooks.insert(bookID);
         return true;
     }
 
-    void ResetBookGuard() {
-        s_readBooks.clear();
-        logger::debug("[EA] Book guard: cleared.");
-    }
-
     // -----------------------------------------------------------------------
     // Quest guard
     // -----------------------------------------------------------------------
-    bool RegisterQuestXP(RE::FormID questID) {
-        if (s_completedQuests.contains(questID)) {
-            logger::debug("[EA] Quest guard: FormID {:08X} already awarded XP — skipped.", questID);
-            return false;
-        }
-        s_completedQuests.insert(questID);
-        return true;
-    }
-
-    void AwardXPIfQuestNew(RE::FormID questID, float amount, const AwardContext& context) {
-        if (!RegisterQuestXP(questID)) return;
-        AwardXP(amount, context);
-    }
-
-    void ResetQuestGuard() {
-        s_completedQuests.clear();
-        logger::info("[EA] Quest guard: cleared.");
+    bool ObserveQuestStatus(RE::FormID questID, RewardRules::QuestSignal signal) {
+        return s_questLifecycle.Observe(questID, signal);
     }
 
     bool RegisterLocationDiscovery(std::uintptr_t markerKey) {
@@ -139,26 +123,33 @@ namespace EA::XPManager {
         return true;
     }
 
-    void ResetLocationDiscoveryGuard() {
-        s_discoveredLocationMarkers.clear();
-        logger::debug("[EA] Location discovery guard: cleared.");
-    }
-
     bool RegisterLocationClear(RE::FormID locationID) {
         if (locationID == 0) {
             return false;
         }
         if (s_clearedLocations.contains(locationID)) {
-            logger::debug("[EA] Location clear guard: FormID {:08X} already awarded — skipped.", locationID);
+            logger::debug("[EA] Location clear guard: FormID {:08X} already awarded - skipped.", locationID);
             return false;
         }
         s_clearedLocations.insert(locationID);
         return true;
     }
 
-    void ResetLocationClearGuard() {
+    void ResetRewardGuards() {
+        s_deadActors.clear();
+        s_readBooks.clear();
+        s_questLifecycle.Reset();
+        s_discoveredLocationMarkers.clear();
         s_clearedLocations.clear();
-        logger::debug("[EA] Location clear guard: cleared.");
+        ++s_rewardGeneration;
+        if (s_rewardGeneration == 0) {
+            s_rewardGeneration = 1;
+        }
+        logger::info("[EA] Reward state: all transient guards reset.");
+    }
+
+    std::uint64_t GetRewardGeneration() {
+        return s_rewardGeneration;
     }
 
     // -----------------------------------------------------------------------
@@ -211,7 +202,10 @@ namespace EA::XPManager {
     // entirely natively. No chaining code needed on our side.
     // -----------------------------------------------------------------------
     void AwardXP(float amount, const AwardContext& context) {
-        if (amount <= 0.0f) return;
+        if (!std::isfinite(amount) || amount <= 0.0f) {
+            logger::warn("[EA] AwardXP: rejected invalid amount {} from source '{}'.", amount, context.sourceKey);
+            return;
+        }
 
         auto* player = RE::PlayerCharacter::GetSingleton();
         if (!player) {
@@ -226,9 +220,18 @@ namespace EA::XPManager {
         }
 
         float systemXPBefore = skills->data->xp;
-        skills->data->xp += amount;
-        float systemXPAfter = skills->data->xp;
-        s_currentXP = systemXPAfter;
+        if (!std::isfinite(systemXPBefore) || systemXPBefore < 0.0f) {
+            logger::error("[EA] AwardXP: native XP bucket is invalid ({}); award rejected.", systemXPBefore);
+            return;
+        }
+
+        const float systemXPAfter = systemXPBefore + amount;
+        if (!std::isfinite(systemXPAfter)) {
+            logger::error("[EA] AwardXP: XP addition would overflow ({} + {}); award rejected.",
+                systemXPBefore, amount);
+            return;
+        }
+        skills->data->xp = systemXPAfter;
 
         if (EA::Config::verbose) {
             logger::info("[EA] XP award: +{:.1f} | source={} | {} | system_xp={:.1f} -> {:.1f} | threshold={:.1f} | level={}",
@@ -254,7 +257,7 @@ namespace EA::XPManager {
             std::string msg = (it != EA::Config::notificationMessages.end() && !it->second.empty())
                 ? std::format("{} +{:.0f} XP", it->second, amount)
                 : std::format("+{:.0f} XP", amount);
-            RE::DebugNotification(msg.c_str());
+            ShowXPNotification(msg.c_str());
         }
     }
 }

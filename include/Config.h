@@ -74,27 +74,46 @@ namespace EA::Config {
     inline float xpLockMaster     = 6.0f;
 
     // Leveling curve
-    inline float xpBase     = 5.0f;
-    inline float xpIncrease = 1.0f;
-    inline float xpCap      = 500.0f;
+    inline constexpr float kDefaultXPBase     = 200.0f;
+    inline constexpr float kDefaultXPIncrease =  25.0f;
+    inline constexpr float kDefaultXPCap      = 1000.0f;
+
+    inline float xpBase     = kDefaultXPBase;
+    inline float xpIncrease = kDefaultXPIncrease;
+    inline float xpCap      = kDefaultXPCap;
 
     // Skill allocation
-    inline int skillPointsPerLevel = 10;
-    inline float skillCap = 200.0f;
+    inline constexpr int   kDefaultSkillPointsPerLevel = 10;
+    inline constexpr float kDefaultSkillCap = 200.0f;
+    inline int skillPointsPerLevel = kDefaultSkillPointsPerLevel;
+    inline float skillCap = kDefaultSkillCap;
 
     // Skill menu UI layout (passed to SWF at runtime)
-    inline int menuPanelWidth     = 820;
-    inline int menuPanelHeight    = 0;
-    inline int menuPanelYOffset   = -90;
-    inline int menuSkillRowGap    = 36;
-    inline int menuSkillColumnGap = 22;
-    inline int menuSkillLabelValueGap = 4;
-    inline int menuSkillValueArrowGap = 2;
-    inline int menuSkillButtonTopGap = 18;
-    inline int menuSkillButtonRowOffset = 12;
-    inline int menuSkillButtonGap = 16;
-    inline int menuFontSize       = 13;
-    inline int menuHeaderFontSize = 16;
+    inline constexpr int kDefaultMenuPanelWidth = 820;
+    inline constexpr int kDefaultMenuPanelHeight = 0;
+    inline constexpr int kDefaultMenuPanelYOffset = -90;
+    inline constexpr int kDefaultMenuSkillRowGap = 36;
+    inline constexpr int kDefaultMenuSkillColumnGap = 22;
+    inline constexpr int kDefaultMenuSkillLabelValueGap = 4;
+    inline constexpr int kDefaultMenuSkillValueArrowGap = 2;
+    inline constexpr int kDefaultMenuSkillButtonTopGap = 18;
+    inline constexpr int kDefaultMenuSkillButtonRowOffset = 12;
+    inline constexpr int kDefaultMenuSkillButtonGap = 16;
+    inline constexpr int kDefaultMenuFontSize = 13;
+    inline constexpr int kDefaultMenuHeaderFontSize = 16;
+
+    inline int menuPanelWidth = kDefaultMenuPanelWidth;
+    inline int menuPanelHeight = kDefaultMenuPanelHeight;
+    inline int menuPanelYOffset = kDefaultMenuPanelYOffset;
+    inline int menuSkillRowGap = kDefaultMenuSkillRowGap;
+    inline int menuSkillColumnGap = kDefaultMenuSkillColumnGap;
+    inline int menuSkillLabelValueGap = kDefaultMenuSkillLabelValueGap;
+    inline int menuSkillValueArrowGap = kDefaultMenuSkillValueArrowGap;
+    inline int menuSkillButtonTopGap = kDefaultMenuSkillButtonTopGap;
+    inline int menuSkillButtonRowOffset = kDefaultMenuSkillButtonRowOffset;
+    inline int menuSkillButtonGap = kDefaultMenuSkillButtonGap;
+    inline int menuFontSize = kDefaultMenuFontSize;
+    inline int menuHeaderFontSize = kDefaultMenuHeaderFontSize;
 
     inline float GetReward(
         const std::unordered_map<std::string, float>& rewards,

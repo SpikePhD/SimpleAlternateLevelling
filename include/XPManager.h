@@ -4,6 +4,8 @@
 #include <optional>
 #include <string_view>
 
+#include "RewardRules.h"
+
 namespace EA::XPManager {
 
     enum class AwardKind {
@@ -36,48 +38,35 @@ namespace EA::XPManager {
     // and overflow carry.
     void AwardXP(float amount, const AwardContext& context);
 
-    // Cosave accessors.
-    float GetCurrentXP();
-    void  SetCurrentXP(float xp);
-
     // Kill deduplication guard.
     // Returns true if this is a new kill (XP should be awarded).
     // Returns false if this FormID was already processed this session.
     bool RegisterKill(RE::FormID actorID);
-
-    // Clears the kill guard set. Call on game load and new game.
-    void ResetKillGuard();
 
     // Book deduplication guard.
     // Returns true if this book has not yet been awarded XP this session.
     // Returns false if already processed (skip).
     bool RegisterBookRead(RE::FormID bookID);
 
-    // Clears the book guard set. Call on game load and new game.
-    void ResetBookGuard();
-
-    // Quest completion deduplication guard.
-    // Returns true if this quest FormID has not yet been awarded XP this session.
-    // Returns false if already processed (skip).
-    bool RegisterQuestXP(RE::FormID questID);
-
-    // Awards XP only if the quest FormID has not been seen before this session.
-    // Combines RegisterQuestXP + AwardXP in one call.
-    void AwardXPIfQuestNew(RE::FormID questID, float amount, const AwardContext& context);
-
-    // Clears the quest guard set. Call on game load and new game.
-    void ResetQuestGuard();
+    // Returns true only for the first completion in a quest lifecycle. Start
+    // and reset signals re-arm repeatable quests without awarding XP.
+    bool ObserveQuestStatus(RE::FormID questID, RewardRules::QuestSignal signal);
 
     // Location discovery/clearing deduplication guards.
     bool RegisterLocationDiscovery(std::uintptr_t markerKey);
-    void ResetLocationDiscoveryGuard();
-
     bool RegisterLocationClear(RE::FormID locationID);
-    void ResetLocationClearGuard();
+
+    // Clears all transient reward guards and lifecycle state. Call for every
+    // load, revert, and new game so state cannot leak between characters.
+    void ResetRewardGuards();
+
+    // Deferred reward tasks capture this value and abort if a load/revert/new
+    // game has reset transient state before they execute.
+    [[nodiscard]] std::uint64_t GetRewardGeneration();
 
     // Pending skill points - unspent points from the last level-up's allocation
     // menu that carry over to the next level-up.
-    // Persisted in cosave v4.
+    // Persisted in the plugin cosave.
     int  GetPendingSkillPoints();
     void SetPendingSkillPoints(int n);
 }

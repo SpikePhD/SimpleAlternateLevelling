@@ -5,7 +5,7 @@
     "verbose": true,
     "max_log_files": 10,
     "_comment_verbose": "Set true to enable trace logging (skill hook intercepts, event details). WARNING: generates large log files.",
-    "_comment_max_log_files": "Maximum number of session log files to keep in the Spike folder. Oldest are deleted first."
+    "_comment_max_log_files": "Maximum number of session logs to keep in the standard SKSE log directory (0 keeps all; valid range 0-1000)."
   },
 
   "xp_sources": {

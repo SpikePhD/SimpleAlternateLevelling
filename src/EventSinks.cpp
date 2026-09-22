@@ -2,85 +2,37 @@
 #include "EventSinks.h"
 #include "XPManager.h"
 #include "Config.h"
+#include "Leveling.h"
+#include "RewardRules.h"
+#include "RE/A/ActorKill.h"
 #include "RE/E/ExtraMapMarker.h"
+#include "RE/I/ItemsPickpocketed.h"
+#include "RE/L/LevelIncrease.h"
 #include "RE/L/LocationCleared.h"
 #include "RE/L/LocationDiscovery.h"
+#include "RE/L/LockpickingMenu.h"
+#include "RE/O/ObjectiveState.h"
+#include "RE/Q/QuestStatus.h"
 #include "RE/B/BGSLocation.h"
 
 // TESTrackedStatsEvent is fully defined in CommonLibSSE-NG at
 // RE/T/TESTrackedStatsEvent.h (included transitively via RE/Skyrim.h in PCH).
 
 namespace EA::EventSinks {
+    static bool s_registered = false;
 
-    // Cache the lock difficulty seen in TESLockChangedEvent; consumed by "Locks Picked" stat.
-    static RE::LOCK_LEVEL s_cachedLockLevel = RE::LOCK_LEVEL::kVeryEasy;
+    struct LockAttempt {
+        RE::FormID    targetID{ 0 };
+        std::int32_t  lockLevel{ 0 };
+    };
+
+    static std::optional<LockAttempt> s_lockAttempt;
+    static std::optional<std::int32_t> s_lastLockCounter;
 
     namespace {
         static std::string_view ClassifyMarkerType(RE::MARKER_TYPE type) {
-            switch (type) {
-                case RE::MARKER_TYPE::kCity: return "city";
-                case RE::MARKER_TYPE::kTown: return "town";
-                case RE::MARKER_TYPE::kSettlement: return "settlement";
-                case RE::MARKER_TYPE::kCave: return "cave";
-                case RE::MARKER_TYPE::kCamp: return "camp";
-                case RE::MARKER_TYPE::kFort: return "fort";
-                case RE::MARKER_TYPE::kNordicRuin: return "nordic_ruin";
-                case RE::MARKER_TYPE::kDwemerRuin: return "dwemer_ruin";
-                case RE::MARKER_TYPE::kShipwreck: return "shipwreck";
-                case RE::MARKER_TYPE::kGrove: return "grove";
-                case RE::MARKER_TYPE::kLandmark: return "landmark";
-                case RE::MARKER_TYPE::kDragonLair: return "dragon_lair";
-                case RE::MARKER_TYPE::kFarm: return "farm";
-                case RE::MARKER_TYPE::kWoodMill: return "wood_mill";
-                case RE::MARKER_TYPE::kMine: return "mine";
-                case RE::MARKER_TYPE::kImperialCamp:
-                case RE::MARKER_TYPE::kStormcloakCamp:
-                case RE::MARKER_TYPE::kGiantCamp:
-                    return "military_camp";
-                case RE::MARKER_TYPE::kDoomstone: return "doomstone";
-                case RE::MARKER_TYPE::kWheatMill: return "wheat_mill";
-                case RE::MARKER_TYPE::kSmelter: return "smelter";
-                case RE::MARKER_TYPE::kStable: return "stable";
-                case RE::MARKER_TYPE::kImperialTower: return "imperial_tower";
-                case RE::MARKER_TYPE::kClearing: return "clearing";
-                case RE::MARKER_TYPE::kPass: return "pass";
-                case RE::MARKER_TYPE::kAltar: return "altar";
-                case RE::MARKER_TYPE::kRock: return "rock";
-                case RE::MARKER_TYPE::kLighthouse: return "lighthouse";
-                case RE::MARKER_TYPE::kOrcStronghold: return "orc_stronghold";
-                case RE::MARKER_TYPE::kShack: return "shack";
-                case RE::MARKER_TYPE::kNordicTower: return "nordic_tower";
-                case RE::MARKER_TYPE::kNordicDwelling: return "nordic_dwelling";
-                case RE::MARKER_TYPE::kDocks: return "docks";
-                case RE::MARKER_TYPE::kRiftenCastle:
-                case RE::MARKER_TYPE::kWindhelmCastle:
-                case RE::MARKER_TYPE::kWhiterunCastle:
-                case RE::MARKER_TYPE::kSolitudeCastle:
-                case RE::MARKER_TYPE::kMarkarthCastle:
-                case RE::MARKER_TYPE::kWinterholdCastle:
-                case RE::MARKER_TYPE::kMorthalCastle:
-                case RE::MARKER_TYPE::kFalkreathCastle:
-                case RE::MARKER_TYPE::kDawnstarCastle:
-                    return "castle";
-                case RE::MARKER_TYPE::kRiftenCapitol:
-                case RE::MARKER_TYPE::kWindhelmCapitol:
-                case RE::MARKER_TYPE::kWhiterunCapitol:
-                case RE::MARKER_TYPE::kSolitudeCapitol:
-                case RE::MARKER_TYPE::kMarkarthCapitol:
-                case RE::MARKER_TYPE::kWinterholdCapitol:
-                case RE::MARKER_TYPE::kMorthalCapitol:
-                case RE::MARKER_TYPE::kFalkreathCapitol:
-                case RE::MARKER_TYPE::kDawnstarCapitol:
-                    return "city";
-                case RE::MARKER_TYPE::kDLC02MiraakTemple:
-                case RE::MARKER_TYPE::kDLC02RavenRock:
-                case RE::MARKER_TYPE::kDLC02StandingStone:
-                case RE::MARKER_TYPE::kDLC02TelvanniTower:
-                case RE::MARKER_TYPE::kDLC02CastleKarstaag:
-                    return "castle";
-                default:
-                    return "default";
-            }
+            return RewardRules::ClassifyMarkerType(
+                static_cast<std::uint16_t>(type));
         }
 
         static std::string_view ClassifyLocation(RE::BGSLocation* location) {
@@ -180,9 +132,8 @@ namespace EA::EventSinks {
         }
     }
 
-
     // -----------------------------------------------------------------------
-    // PRIMARY SINK — TESTrackedStatsEvent
+    // PRIMARY SINK - TESTrackedStatsEvent
     // -----------------------------------------------------------------------
     struct OnLocationDiscovery : public RE::BSTEventSink<RE::LocationDiscovery::Event> {
         RE::BSEventNotifyControl ProcessEvent(
@@ -200,9 +151,11 @@ namespace EA::EventSinks {
 
             auto typeKey = ClassifyMarkerType(static_cast<RE::MARKER_TYPE>(event->mapMarkerData->type.underlying()));
             auto reward = Config::GetReward(Config::locationDiscoveryRewards, typeKey, Config::xpLocationDiscovered);
+            const char* name = event->mapMarkerData->locationName.GetFullName();
+            const auto subject = (name && name[0]) ? name : "Location Discovered";
 
             XPManager::AwardXP(reward,
-                XPManager::MakeStatContext("Location Discovered", "location_discovery", 1, typeKey));
+                XPManager::MakeStatContext(subject, "location_discovery", 1, typeKey));
             return RE::BSEventNotifyControl::kContinue;
         }
     };
@@ -260,17 +213,38 @@ namespace EA::EventSinks {
             }
 
             if (stat == "Locks Picked") {
-                float            xp      = Config::xpLockNovice;
-                std::string_view subtype = "novice";
-                switch (s_cachedLockLevel) {
-                    case RE::LOCK_LEVEL::kVeryEasy: xp = Config::xpLockNovice;     subtype = "novice";     break;
-                    case RE::LOCK_LEVEL::kEasy:     xp = Config::xpLockApprentice; subtype = "apprentice"; break;
-                    case RE::LOCK_LEVEL::kAverage:  xp = Config::xpLockAdept;      subtype = "adept";      break;
-                    case RE::LOCK_LEVEL::kHard:     xp = Config::xpLockExpert;     subtype = "expert";     break;
-                    case RE::LOCK_LEVEL::kVeryHard: xp = Config::xpLockMaster;     subtype = "master";     break;
-                    default:                        xp = Config::xpLockNovice;     subtype = "novice";     break;
+                if (event->value < 0) {
+                    logger::warn("[EA] Lock reward: invalid tracked-stat counter {} rejected.", event->value);
+                    return RE::BSEventNotifyControl::kContinue;
                 }
-                s_cachedLockLevel = RE::LOCK_LEVEL::kVeryEasy;  // reset after consumption
+
+                if (s_lastLockCounter && event->value <= *s_lastLockCounter) {
+                    logger::debug("[EA] Lock reward: duplicate/stale counter {} (last={}) skipped.",
+                        event->value, *s_lastLockCounter);
+                    return RE::BSEventNotifyControl::kContinue;
+                }
+                s_lastLockCounter = event->value;
+
+                std::int32_t lockLevel = 0;
+                RE::FormID targetID = 0;
+                if (s_lockAttempt) {
+                    lockLevel = s_lockAttempt->lockLevel;
+                    targetID = s_lockAttempt->targetID;
+                    s_lockAttempt.reset();
+                } else {
+                    logger::warn("[EA] Lock reward: success counter {} had no captured Lockpicking Menu context; using novice fallback.",
+                        event->value);
+                }
+
+                const auto subtype = RewardRules::ClassifyLockLevel(lockLevel);
+                float xp = Config::xpLockNovice;
+                if (subtype == "apprentice") xp = Config::xpLockApprentice;
+                else if (subtype == "adept") xp = Config::xpLockAdept;
+                else if (subtype == "expert") xp = Config::xpLockExpert;
+                else if (subtype == "master") xp = Config::xpLockMaster;
+
+                logger::info("[EA] Lock reward accepted: target={:08X}, tier={}, counter={}.",
+                    targetID, subtype, event->value);
                 XPManager::AwardXP(xp,
                     XPManager::MakeStatContext(stat, "lock_picked", event->value, subtype));
                 return RE::BSEventNotifyControl::kContinue;
@@ -297,38 +271,32 @@ namespace EA::EventSinks {
             }
 
             if (stat == "Quests Completed") {
-                logger::info("[EA] TrackedStat: Quest completed counter={}. XP via quest stage sink.",
+                logger::info("[EA] TrackedStat: Quest completed counter={} (diagnostic only; XP via QuestStatus::Event).",
                     event->value);
                 return RE::BSEventNotifyControl::kContinue;
             }
 
             if (stat == "Misc Objectives Completed") {
-                XPManager::AwardXP(Config::xpQuestObjectives,
-                    XPManager::MakeStatContext(stat, "quest_objectives", event->value, "misc_objective"));
+                logger::info("[EA] TrackedStat: Misc Objectives Completed={} (diagnostic only; XP via ObjectiveState::Event).",
+                    event->value);
                 return RE::BSEventNotifyControl::kContinue;
             }
 
             if (stat == "Items Pickpocketed") {
-                XPManager::AwardXP(Config::xpPickpocketBase,
-                    XPManager::MakeStatContext(stat, "pickpocket", event->value, "base"));
+                logger::info("[EA] TrackedStat: Items Pickpocketed={} (diagnostic only; XP via ItemsPickpocketed::Event).",
+                    event->value);
                 return RE::BSEventNotifyControl::kContinue;
             }
 
             if (stat == "Level Increases") {
                 auto* player = RE::PlayerCharacter::GetSingleton();
-                if (!player) return RE::BSEventNotifyControl::kContinue;
+                auto* skills = player ? player->GetInfoRuntimeData().skills : nullptr;
+                const float threshold = (skills && skills->data) ? skills->data->levelThreshold : -1.0f;
 
-                auto* skills = player->GetInfoRuntimeData().skills;
-                if (!skills || !skills->data) return RE::BSEventNotifyControl::kContinue;
-
-                float uncapped = skills->data->levelThreshold;
-                float capped   = std::min(uncapped, EA::Config::xpCap);
-                skills->data->levelThreshold = capped;
-
-                logger::info("[EA] Level Increases = {} | GetLevel()={} | threshold: {:.1f} -> {:.1f} (cap={:.1f})",
+                logger::info("[EA] TrackedStat: Level Increases = {} | pre-finalization level={} threshold={:.1f} (diagnostic only).",
                     event->value,
-                    static_cast<int>(player->GetLevel()),
-                    uncapped, capped, EA::Config::xpCap);
+                    player ? static_cast<int>(player->GetLevel()) : -1,
+                    threshold);
 
                 return RE::BSEventNotifyControl::kContinue;
             }
@@ -348,22 +316,31 @@ namespace EA::EventSinks {
     };
 
     // -----------------------------------------------------------------------
-    // KILL SINK — TESDeathEvent
+    // KILL SINK — ActorKill::Event
     // -----------------------------------------------------------------------
-    struct OnActorKill : public RE::BSTEventSink<RE::TESDeathEvent> {
+    struct OnActorKill : public RE::BSTEventSink<RE::ActorKill::Event> {
         RE::BSEventNotifyControl ProcessEvent(
-            const RE::TESDeathEvent*                  event,
-            RE::BSTEventSource<RE::TESDeathEvent>*) override
+            const RE::ActorKill::Event* event,
+            RE::BSTEventSource<RE::ActorKill::Event>*) override
         {
-            if (!event || !event->actorDying || !event->actorKiller)
+            if (!event || !event->killer || !event->victim)
                 return RE::BSEventNotifyControl::kContinue;
 
             auto* player = RE::PlayerCharacter::GetSingleton();
-            if (!player || event->actorKiller.get() != player)
+            if (!player)
                 return RE::BSEventNotifyControl::kContinue;
 
-            auto* dying = event->actorDying.get();
-            if (!dying || dying->IsPlayerRef())
+            auto* killer = event->killer;
+            const auto commander = killer->GetCommandingActor();
+            const bool playerCredited = killer == player || commander.get() == player;
+            if (!playerCredited) {
+                logger::debug("[EA] Kill reward: killer '{}' is neither player nor player-commanded; skipped.",
+                    killer->GetName());
+                return RE::BSEventNotifyControl::kContinue;
+            }
+
+            auto* dying = event->victim;
+            if (dying->IsPlayerRef())
                 return RE::BSEventNotifyControl::kContinue;
 
             if (!XPManager::RegisterKill(dying->GetFormID()))
@@ -386,11 +363,14 @@ namespace EA::EventSinks {
             else if (kwCreature && dying->HasKeyword(kwCreature)) { baseXP = Config::xpKillCreature; typeName = "creature"; }
             else if (kwNPC      && dying->HasKeyword(kwNPC))      { baseXP = Config::xpKillHumanoid; typeName = "humanoid"; }
 
-            int   playerLevel = static_cast<int>(player->GetLevel());
-            int   enemyLevel  = static_cast<int>(static_cast<RE::Actor*>(dying)->GetLevel());
-            float bonus       = static_cast<float>(std::max(0, enemyLevel - playerLevel))
-                                    * Config::xpKillLevelScaleFactor;
-            float totalXP     = (baseXP + bonus) * Config::xpKillGlobalMultiplier;
+            const int playerLevel = static_cast<int>(player->GetLevel());
+            const int enemyLevel = static_cast<int>(dying->GetLevel());
+            const float totalXP = RewardRules::CalculateKillReward(
+                baseXP,
+                enemyLevel,
+                playerLevel,
+                Config::xpKillLevelScaleFactor,
+                Config::xpKillGlobalMultiplier);
 
             XPManager::AwardXP(totalXP,
                 XPManager::MakeKillContext(dying->GetName(), dying->GetFormID(), enemyLevel, typeName));
@@ -398,19 +378,52 @@ namespace EA::EventSinks {
         }
     };
 
-    // -----------------------------------------------------------------------
-    // QUEST SINK — TESQuestStageEvent
-    // -----------------------------------------------------------------------
-    struct OnQuestStage : public RE::BSTEventSink<RE::TESQuestStageEvent> {
+    struct OnLevelIncrease : public RE::BSTEventSink<RE::LevelIncrease::Event> {
         RE::BSEventNotifyControl ProcessEvent(
-            const RE::TESQuestStageEvent*                  event,
-            RE::BSTEventSource<RE::TESQuestStageEvent>*) override
+            const RE::LevelIncrease::Event*                  event,
+            RE::BSTEventSource<RE::LevelIncrease::Event>*) override
         {
-            if (!event) return RE::BSEventNotifyControl::kContinue;
-
-            auto* quest = RE::TESForm::LookupByID<RE::TESQuest>(event->formID);
-            if (!quest || !quest->IsCompleted())
+            auto* player = RE::PlayerCharacter::GetSingleton();
+            if (!event || !player || event->player != player) {
                 return RE::BSEventNotifyControl::kContinue;
+            }
+
+            Leveling::QueueThresholdRefresh(
+                static_cast<std::uint32_t>(event->newLevel),
+                "level-increase");
+            return RE::BSEventNotifyControl::kContinue;
+        }
+    };
+
+    // -----------------------------------------------------------------------
+    // QUEST SINK — QuestStatus::Event lifecycle transitions
+    // -----------------------------------------------------------------------
+    struct OnQuestStatus : public RE::BSTEventSink<RE::QuestStatus::Event> {
+        RE::BSEventNotifyControl ProcessEvent(
+            const RE::QuestStatus::Event*                  event,
+            RE::BSTEventSource<RE::QuestStatus::Event>*) override
+        {
+            if (!event || !event->quest) {
+                return RE::BSEventNotifyControl::kContinue;
+            }
+
+            auto* quest = event->quest;
+            const auto questID = quest->GetFormID();
+            if (event->status == RE::QuestStatus::kStarted) {
+                XPManager::ObserveQuestStatus(questID, RewardRules::QuestSignal::kStarted);
+                logger::debug("[EA] Quest lifecycle: {:08X} started; completion guard rearmed.", questID);
+                return RE::BSEventNotifyControl::kContinue;
+            }
+            if (event->status == RE::QuestStatus::kReseted) {
+                XPManager::ObserveQuestStatus(questID, RewardRules::QuestSignal::kReset);
+                logger::debug("[EA] Quest lifecycle: {:08X} reset; completion guard rearmed.", questID);
+                return RE::BSEventNotifyControl::kContinue;
+            }
+            if (event->status != RE::QuestStatus::kCompleted ||
+                !XPManager::ObserveQuestStatus(questID, RewardRules::QuestSignal::kCompleted)) {
+                logger::debug("[EA] Quest lifecycle: duplicate completion for {:08X} skipped.", questID);
+                return RE::BSEventNotifyControl::kContinue;
+            }
 
             float            xp       = Config::xpQuestOther;
             std::string_view typeName = "quest_other";
@@ -443,35 +456,101 @@ namespace EA::EventSinks {
                     xp = Config::xpQuestOther;     typeName = "quest_other";     break;
             }
 
-            XPManager::AwardXPIfQuestNew(quest->GetFormID(), xp,
-                XPManager::MakeQuestContext(quest->GetName(), quest->GetFormID(), typeName));
+            XPManager::AwardXP(xp,
+                XPManager::MakeQuestContext(quest->GetName(), questID, typeName));
             return RE::BSEventNotifyControl::kContinue;
         }
     };
 
     // -----------------------------------------------------------------------
-    // LOCK LEVEL CACHE SINK — TESLockChangedEvent
-    // Caches the lock difficulty level whenever a lock transitions to unlocked.
-    // Consumed by the "Locks Picked" TrackedStat handler to award tier-appropriate XP.
+    // Exact objective, pickpocket, and lock-attempt event sources.
     // -----------------------------------------------------------------------
-    struct OnLockChanged : public RE::BSTEventSink<RE::TESLockChangedEvent> {
+    struct OnObjectiveState : public RE::BSTEventSink<RE::ObjectiveState::Event> {
         RE::BSEventNotifyControl ProcessEvent(
-            const RE::TESLockChangedEvent*                  event,
-            RE::BSTEventSource<RE::TESLockChangedEvent>*) override
+            const RE::ObjectiveState::Event*                  event,
+            RE::BSTEventSource<RE::ObjectiveState::Event>*) override
         {
-            if (!event || !event->lockedObject) return RE::BSEventNotifyControl::kContinue;
-            auto* ref = event->lockedObject.get();
-            if (!ref) return RE::BSEventNotifyControl::kContinue;
-
-            auto* extraLock = ref->extraList.GetByType<RE::ExtraLock>();
-            if (!extraLock || !extraLock->lock) return RE::BSEventNotifyControl::kContinue;
-
-            // Cache difficulty whenever a lock becomes unlocked.
-            // IsLocked() checks REFR_LOCK::Flag::kLocked; GetLockLevel() resolves
-            // the LOCK_LEVEL from baseLevel (accounting for leveled lock scaling).
-            if (!extraLock->lock->IsLocked()) {
-                s_cachedLockLevel = extraLock->lock->GetLockLevel(ref);
+            if (!event || !event->objective || !event->objective->ownerQuest) {
+                return RE::BSEventNotifyControl::kContinue;
             }
+
+            auto* objective = event->objective;
+            if (objective->ownerQuest->GetType() != RE::QUEST_DATA::Type::kMiscellaneous ||
+                !RewardRules::IsObjectiveCompletionTransition(
+                    static_cast<std::uint8_t>(event->oldState),
+                    static_cast<std::uint8_t>(event->newState))) {
+                return RE::BSEventNotifyControl::kContinue;
+            }
+
+            const auto text = objective->displayText.c_str();
+            const auto subject = (text && text[0]) ? text : "Misc Objective";
+            XPManager::AwardXP(Config::xpQuestObjectives,
+                XPManager::MakeStatContext(subject, "quest_objectives", objective->index, "misc_objective"));
+            return RE::BSEventNotifyControl::kContinue;
+        }
+    };
+
+    struct OnItemsPickpocketed : public RE::BSTEventSink<RE::ItemsPickpocketed::Event> {
+        RE::BSEventNotifyControl ProcessEvent(
+            const RE::ItemsPickpocketed::Event*                  event,
+            RE::BSTEventSource<RE::ItemsPickpocketed::Event>*) override
+        {
+            if (!event || !RewardRules::ShouldRewardPickpocket(event->numItems)) {
+                return RE::BSEventNotifyControl::kContinue;
+            }
+
+            XPManager::AwardXP(Config::xpPickpocketBase,
+                XPManager::MakeStatContext("Items Pickpocketed", "pickpocket", event->numItems, "pickpocket"));
+            return RE::BSEventNotifyControl::kContinue;
+        }
+    };
+
+    struct OnLockpickingMenu : public RE::BSTEventSink<RE::MenuOpenCloseEvent> {
+        RE::BSEventNotifyControl ProcessEvent(
+            const RE::MenuOpenCloseEvent*                  event,
+            RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
+        {
+            if (!event || event->menuName != RE::LockpickingMenu::MENU_NAME) {
+                return RE::BSEventNotifyControl::kContinue;
+            }
+
+            if (event->opening) {
+                auto target = RE::LockpickingMenu::GetTargetReference();
+                if (!target) {
+                    s_lockAttempt.reset();
+                    logger::warn("[EA] Lock reward: Lockpicking Menu opened without a target.");
+                    return RE::BSEventNotifyControl::kContinue;
+                }
+
+                s_lockAttempt = LockAttempt{
+                    target->GetFormID(),
+                    static_cast<std::int32_t>(target->GetLockLevel())
+                };
+                logger::debug("[EA] Lock reward: captured target={:08X}, raw tier={}.",
+                    s_lockAttempt->targetID, s_lockAttempt->lockLevel);
+                return RE::BSEventNotifyControl::kContinue;
+            }
+
+            if (!s_lockAttempt) {
+                return RE::BSEventNotifyControl::kContinue;
+            }
+
+            const auto targetID = s_lockAttempt->targetID;
+            const auto generation = XPManager::GetRewardGeneration();
+            auto* task = SKSE::GetTaskInterface();
+            if (!task) {
+                logger::warn("[EA] Lock reward: task interface unavailable; clearing closed-menu context for {:08X}.", targetID);
+                s_lockAttempt.reset();
+                return RE::BSEventNotifyControl::kContinue;
+            }
+
+            task->AddTask([targetID, generation]() {
+                if (XPManager::GetRewardGeneration() == generation &&
+                    s_lockAttempt && s_lockAttempt->targetID == targetID) {
+                    logger::debug("[EA] Lock reward: abandoned attempt for {:08X} cleared after menu close.", targetID);
+                    s_lockAttempt.reset();
+                }
+            });
             return RE::BSEventNotifyControl::kContinue;
         }
     };
@@ -483,10 +562,24 @@ namespace EA::EventSinks {
     static OnLocationCleared   s_locationClearedSink;
     static OnTrackedStats s_trackedStatsSink;
     static OnActorKill    s_killSink;
-    static OnQuestStage   s_questSink;
-    static OnLockChanged  s_lockChangedSink;
+    static OnLevelIncrease s_levelIncreaseSink;
+    static OnQuestStatus s_questSink;
+    static OnObjectiveState s_objectiveSink;
+    static OnItemsPickpocketed s_pickpocketSink;
+    static OnLockpickingMenu s_lockpickingMenuSink;
+
+    void ResetRewardState() {
+        XPManager::ResetRewardGuards();
+        s_lockAttempt.reset();
+        s_lastLockCounter.reset();
+        logger::debug("[EA] Transient reward state reset.");
+    }
 
     void Register() {
+        if (s_registered) {
+            logger::debug("[EA] EventSinks: registration already completed.");
+            return;
+        }
         auto* src = RE::ScriptEventSourceHolder::GetSingleton();
         if (!src) {
             logger::error("[EA] EventSinks: ScriptEventSourceHolder is null.");
@@ -495,12 +588,10 @@ namespace EA::EventSinks {
 
         logger::info("[EA] EventSinks: Registering sinks...");
 
-        }
-
         auto* discoverySrc = RE::LocationDiscovery::GetEventSource();
         if (discoverySrc) {
             discoverySrc->AddEventSink(&s_locationDiscoverySink);
-            logger::info("[EA] EventSinks: [1/6] LocationDiscovery event sink registered.");
+            logger::info("[EA] EventSinks: [1/9] LocationDiscovery event sink registered.");
         } else {
             logger::error("[EA] EventSinks: LocationDiscovery event source is null.");
         }
@@ -508,31 +599,70 @@ namespace EA::EventSinks {
         auto* clearedSrc = RE::LocationCleared::GetEventSource();
         if (clearedSrc) {
             clearedSrc->AddEventSink(&s_locationClearedSink);
-            logger::info("[EA] EventSinks: [2/6] LocationCleared event sink registered.");
+            logger::info("[EA] EventSinks: [2/9] LocationCleared event sink registered.");
         } else {
             logger::error("[EA] EventSinks: LocationCleared event source is null.");
         }
 
-        src->GetEventSource<RE::TESTrackedStatsEvent>()->AddEventSink(&s_trackedStatsSink);
-        logger::info("[EA] EventSinks: [3/6] TESTrackedStatsEvent registered.");
+        if (auto* trackedSrc = src->GetEventSource<RE::TESTrackedStatsEvent>()) {
+            trackedSrc->AddEventSink(&s_trackedStatsSink);
+            logger::info("[EA] EventSinks: [3/9] TESTrackedStatsEvent registered.");
+        } else {
+            logger::error("[EA] EventSinks: TESTrackedStatsEvent source is null.");
+        }
 
-        src->GetEventSource<RE::TESDeathEvent>()->AddEventSink(&s_killSink);
-        logger::info("[EA] EventSinks: [4/6] TESDeathEvent (kill) registered.");
+        if (auto* killSrc = RE::ActorKill::GetEventSource()) {
+            killSrc->AddEventSink(&s_killSink);
+            logger::info("[EA] EventSinks: [4/9] ActorKill::Event registered.");
+        } else {
+            logger::error("[EA] EventSinks: ActorKill event source is null.");
+        }
 
-        src->GetEventSource<RE::TESQuestStageEvent>()->AddEventSink(&s_questSink);
-        logger::info("[EA] EventSinks: [5/6] TESQuestStageEvent registered.");
+        auto* levelIncreaseSrc = RE::LevelIncrease::GetEventSource();
+        if (levelIncreaseSrc) {
+            levelIncreaseSrc->AddEventSink(&s_levelIncreaseSink);
+            logger::info("[EA] EventSinks: [5/9] LevelIncrease::Event registered.");
+        } else {
+            logger::error("[EA] EventSinks: LevelIncrease event source is null.");
+        }
 
-        src->GetEventSource<RE::TESLockChangedEvent>()->AddEventSink(&s_lockChangedSink);
-        logger::info("[EA] EventSinks: [6/6] TESLockChangedEvent (lock level cache) registered.");
+        if (auto* questSrc = RE::QuestStatus::GetEventSource()) {
+            questSrc->AddEventSink(&s_questSink);
+            logger::info("[EA] EventSinks: [6/9] QuestStatus::Event registered.");
+        } else {
+            logger::error("[EA] EventSinks: QuestStatus event source is null.");
+        }
 
-        logger::warn("[EA] EventSinks: TESActorValueChangeEvent sink SKIPPED — "
+        if (auto* objectiveSrc = RE::ObjectiveState::GetEventSource()) {
+            objectiveSrc->AddEventSink(&s_objectiveSink);
+            logger::info("[EA] EventSinks: [7/9] ObjectiveState::Event registered.");
+        } else {
+            logger::error("[EA] EventSinks: ObjectiveState event source is null.");
+        }
+
+        if (auto* pickpocketSrc = RE::ItemsPickpocketed::GetEventSource()) {
+            pickpocketSrc->AddEventSink(&s_pickpocketSink);
+            logger::info("[EA] EventSinks: [8/9] ItemsPickpocketed::Event registered.");
+        } else {
+            logger::error("[EA] EventSinks: ItemsPickpocketed event source is null.");
+        }
+
+        if (auto* ui = RE::UI::GetSingleton()) {
+            ui->AddEventSink(&s_lockpickingMenuSink);
+            logger::info("[EA] EventSinks: [9/9] Lockpicking Menu event sink registered.");
+        } else {
+            logger::error("[EA] EventSinks: UI singleton is null; lock context unavailable.");
+        }
+
+        logger::warn("[EA] EventSinks: TESActorValueChangeEvent sink SKIPPED - "
                      "struct not defined in this CommonLibSSE-NG build. "
                      "Attribute selection will not be logged.");
 
-        logger::warn("[EA] EventSinks: TESPerkEntryRunEvent sink SKIPPED — "
+        logger::warn("[EA] EventSinks: TESPerkEntryRunEvent sink SKIPPED - "
                      "struct forward-declared only, no field definitions available. "
                      "Perk selection will not be logged.");
 
-        logger::info("[EA] EventSinks: All sinks registered (6/6 active, 2/2 diagnostic sinks skipped).");
+        s_registered = true;
+        logger::info("[EA] EventSinks: registration pass completed (9 expected, 2 diagnostic sinks skipped).");
     }
 }

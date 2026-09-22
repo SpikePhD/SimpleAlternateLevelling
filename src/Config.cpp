@@ -1,9 +1,14 @@
 #include "PCH.h"
 #include "Config.h"
+#include "Progression.h"
+#include "LogPolicy.h"
+#include "UIRules.h"
 
 #include <nlohmann/json.hpp>
+#include <cmath>
 #include <fstream>
 #include <filesystem>
+#include <limits>
 
 namespace EA::Config {
 
@@ -14,8 +19,8 @@ namespace EA::Config {
     // ensuring we follow the DLL to wherever it is on disk — critical for MO2 where
     // the DLL lives in the mod folder, not the game's Data directory.
     static std::filesystem::path ResolveConfigPath() {
-        wchar_t buf[REX::W32::MAX_PATH] = {};
-        REX::W32::GetModuleFileNameW(REX::W32::GetCurrentModule(), buf, REX::W32::MAX_PATH);
+        wchar_t buf[260] = {};
+        REX::W32::GetModuleFileNameW(REX::W32::GetCurrentModule(), buf, static_cast<std::uint32_t>(std::size(buf)));
         return std::filesystem::path(buf).parent_path() / "SimpleAlternateLevelling.json";
     }
 
@@ -23,8 +28,12 @@ namespace EA::Config {
     // or the value is not a number.
     static float ReadFloat(const json& j,
                            std::initializer_list<std::string> path,
-                           float defaultVal)
+                           float defaultVal,
+                           bool* rejectedValue = nullptr)
     {
+        if (rejectedValue) {
+            *rejectedValue = false;
+        }
         const json* node = &j;
         for (const auto& key : path) {
             if (!node->is_object() || !node->contains(key)) {
@@ -33,9 +42,27 @@ namespace EA::Config {
             node = &(*node)[key];
         }
         if (!node->is_number()) {
+            if (rejectedValue) {
+                *rejectedValue = true;
+            }
             return defaultVal;
         }
-        return node->get<float>();
+        try {
+            const double value = node->get<double>();
+            const double maxFloat = static_cast<double>(std::numeric_limits<float>::max());
+            if (!std::isfinite(value) || value < -maxFloat || value > maxFloat) {
+                if (rejectedValue) {
+                    *rejectedValue = true;
+                }
+                return defaultVal;
+            }
+            return static_cast<float>(value);
+        } catch (const json::exception&) {
+            if (rejectedValue) {
+                *rejectedValue = true;
+            }
+            return defaultVal;
+        }
     }
 
     // Safely read a string from nested JSON.
@@ -69,6 +96,58 @@ namespace EA::Config {
         return node->get<bool>();
     }
 
+    struct LogRetentionResult {
+        int  value{ LogPolicy::kDefaultMaxLogFiles };
+        bool invalid{ false };
+    };
+
+    struct NumberResult {
+        double value{ 0.0 };
+        bool   present{ false };
+        bool   invalid{ false };
+    };
+
+    static NumberResult ReadNumber(
+        const json& j, std::initializer_list<std::string> path, double defaultValue)
+    {
+        const json* node = &j;
+        for (const auto& key : path) {
+            if (!node->is_object() || !node->contains(key)) {
+                return { defaultValue, false, false };
+            }
+            node = &(*node)[key];
+        }
+        if (!node->is_number()) {
+            return { defaultValue, true, true };
+        }
+        try {
+            const auto value = node->get<double>();
+            return { value, true, !std::isfinite(value) };
+        } catch (const json::exception&) {
+            return { defaultValue, true, true };
+        }
+    }
+
+    static LogRetentionResult ReadLogRetention(const json& j) {
+        if (!j.contains("debug") || !j["debug"].is_object() ||
+            !j["debug"].contains("max_log_files")) {
+            return {};
+        }
+
+        const auto& value = j["debug"]["max_log_files"];
+        if (!value.is_number_integer()) {
+            return { LogPolicy::kDefaultMaxLogFiles, true };
+        }
+
+        try {
+            const auto raw = value.get<std::int64_t>();
+            const auto validated = LogPolicy::ValidateMaxLogFiles(raw);
+            return { validated, raw < 0 || raw > LogPolicy::kMaximumMaxLogFiles };
+        } catch (const json::exception&) {
+            return { LogPolicy::kDefaultMaxLogFiles, true };
+        }
+    }
+
     void Load() {
         auto configPath = ResolveConfigPath();
 
@@ -88,31 +167,36 @@ namespace EA::Config {
         json j;
         try {
             file >> j;
-        } catch (const json::parse_error& e) {
-            logger::error("[EA] Config: JSON parse error in '{}': {}. Using all defaults.",
+        } catch (const json::exception& e) {
+            logger::error("[EA] Config: JSON error in '{}': {}. Using all defaults.",
                           configPath.string(), e.what());
             return;
         }
 
         // Debug
         verbose     = ReadBool(j,  {"debug", "verbose"},       verbose);
-        maxLogFiles = static_cast<int>(ReadFloat(j, {"debug", "max_log_files"}, static_cast<float>(maxLogFiles)));
+        const auto logRetention = ReadLogRetention(j);
+        maxLogFiles = logRetention.value;
+        if (logRetention.invalid) {
+            logger::warn("[EA] Config: debug.max_log_files must be an integer from 0 through {}; using default {}.",
+                LogPolicy::kMaximumMaxLogFiles, LogPolicy::kDefaultMaxLogFiles);
+        }
 
         // Quest XP
         xpQuestMain     = ReadFloat(j, {"xp_sources", "quest", "main"},      xpQuestMain);
+        xpQuestFaction  = ReadFloat(j, {"xp_sources", "quest", "faction"},   xpQuestFaction);
+        xpQuestDLC      = ReadFloat(j, {"xp_sources", "quest", "dlc"},       xpQuestDLC);
         xpQuestCollege  = ReadFloat(j, {"xp_sources", "quest", "college"},   xpQuestCollege);
         xpQuestThieves  = ReadFloat(j, {"xp_sources", "quest", "thieves"},   xpQuestThieves);
         xpQuestBrotherhood = ReadFloat(j, {"xp_sources", "quest", "brotherhood"}, xpQuestBrotherhood);
         xpQuestCompanions = ReadFloat(j, {"xp_sources", "quest", "companions"}, xpQuestCompanions);
         xpQuestSide     = ReadFloat(j, {"xp_sources", "quest", "side"},      xpQuestSide);
         xpQuestMisc     = ReadFloat(j, {"xp_sources", "quest", "misc"},      xpQuestMisc);
-        xpQuestFaction  = ReadFloat(j, {"xp_sources", "quest", "faction"},   xpQuestFaction);
         xpQuestDaedric  = ReadFloat(j, {"xp_sources", "quest", "daedric"},   xpQuestDaedric);
         xpQuestCivilWar = ReadFloat(j, {"xp_sources", "quest", "civil_war"}, xpQuestCivilWar);
         xpQuestDawnguard = ReadFloat(j, {"xp_sources", "quest", "dawnguard"}, xpQuestDawnguard);
         xpQuestDragonborn = ReadFloat(j, {"xp_sources", "quest", "dragonborn"}, xpQuestDragonborn);
         xpQuestObjectives = ReadFloat(j, {"xp_sources", "quest", "objectives"}, xpQuestObjectives);
-        xpQuestDLC      = ReadFloat(j, {"xp_sources", "quest", "dlc"},       xpQuestDLC);
         xpQuestOther    = ReadFloat(j, {"xp_sources", "quest", "other"},     xpQuestOther);
 
         // Kill XP
@@ -187,29 +271,89 @@ namespace EA::Config {
         xpLockMaster     = ReadFloat(j, {"xp_sources", "lockpick", "master"},     xpLockMaster);
 
         // Leveling curve
-        xpBase     = ReadFloat(j, {"leveling", "xp_base"},     xpBase);
-        xpIncrease = ReadFloat(j, {"leveling", "xp_increase"}, xpIncrease);
-        xpCap      = ReadFloat(j, {"leveling", "xp_cap"},      xpCap);
+        bool rejectedXPBase = false;
+        bool rejectedXPIncrease = false;
+        bool rejectedXPCap = false;
+        xpBase     = ReadFloat(j, {"leveling", "xp_base"},     xpBase, &rejectedXPBase);
+        xpIncrease = ReadFloat(j, {"leveling", "xp_increase"}, xpIncrease, &rejectedXPIncrease);
+        xpCap      = ReadFloat(j, {"leveling", "xp_cap"},      xpCap, &rejectedXPCap);
 
-        // Skill allocation
-        skillPointsPerLevel = static_cast<int>(ReadFloat(j,
-            {"skill_allocation", "points_per_level"},
-            static_cast<float>(skillPointsPerLevel)));
-        skillCap = ReadFloat(j, {"skill_allocation", "skill_cap"}, skillCap);
+        // Preserve the distinction between a missing field (use the current
+        // default) and a present but unrepresentable field (reject and warn).
+        if (rejectedXPBase) {
+            xpBase = std::numeric_limits<float>::quiet_NaN();
+        }
+        if (rejectedXPIncrease) {
+            xpIncrease = std::numeric_limits<float>::quiet_NaN();
+        }
+        if (rejectedXPCap) {
+            xpCap = std::numeric_limits<float>::quiet_NaN();
+        }
 
-        // Skill menu UI layout
-        menuPanelWidth     = static_cast<int>(ReadFloat(j, {"skill_allocation", "panel_width"},     static_cast<float>(menuPanelWidth)));
-        menuPanelHeight    = static_cast<int>(ReadFloat(j, {"skill_allocation", "panel_height"},    static_cast<float>(menuPanelHeight)));
-        menuPanelYOffset   = static_cast<int>(ReadFloat(j, {"skill_allocation", "panel_y_offset"},  static_cast<float>(menuPanelYOffset)));
-        menuSkillRowGap    = static_cast<int>(ReadFloat(j, {"skill_allocation", "row_gap"},         static_cast<float>(menuSkillRowGap)));
-        menuSkillColumnGap = static_cast<int>(ReadFloat(j, {"skill_allocation", "column_gap"},      static_cast<float>(menuSkillColumnGap)));
-        menuSkillLabelValueGap = static_cast<int>(ReadFloat(j, {"skill_allocation", "label_value_gap"}, static_cast<float>(menuSkillLabelValueGap)));
-        menuSkillValueArrowGap = static_cast<int>(ReadFloat(j, {"skill_allocation", "value_arrow_gap"}, static_cast<float>(menuSkillValueArrowGap)));
-        menuSkillButtonTopGap = static_cast<int>(ReadFloat(j, {"skill_allocation", "button_top_gap"}, static_cast<float>(menuSkillButtonTopGap)));
-        menuSkillButtonRowOffset = static_cast<int>(ReadFloat(j, {"skill_allocation", "button_row_offset"}, static_cast<float>(menuSkillButtonRowOffset)));
-        menuSkillButtonGap   = static_cast<int>(ReadFloat(j, {"skill_allocation", "button_gap"},      static_cast<float>(menuSkillButtonGap)));
-        menuFontSize       = static_cast<int>(ReadFloat(j, {"skill_allocation", "font_size"},       static_cast<float>(menuFontSize)));
-        menuHeaderFontSize = static_cast<int>(ReadFloat(j, {"skill_allocation", "header_font_size"}, static_cast<float>(menuHeaderFontSize)));
+        const auto validatedCurve = Progression::ValidateCurve(
+            { xpBase, xpIncrease, xpCap },
+            { kDefaultXPBase, kDefaultXPIncrease, kDefaultXPCap });
+        if (validatedCurve.replacedBase) {
+            logger::warn("[EA] Config: leveling.xp_base is invalid; using built-in default {:.1f}.", kDefaultXPBase);
+        }
+        if (validatedCurve.replacedIncrease) {
+            logger::warn("[EA] Config: leveling.xp_increase is invalid; using built-in default {:.1f}.", kDefaultXPIncrease);
+        }
+        if (validatedCurve.replacedCap) {
+            logger::warn("[EA] Config: leveling.xp_cap is invalid; using built-in default {:.1f}.", kDefaultXPCap);
+        }
+        xpBase     = validatedCurve.curve.base;
+        xpIncrease = validatedCurve.curve.increase;
+        xpCap      = validatedCurve.curve.cap;
+
+        // Skill allocation and UI layout. Each present invalid value is
+        // rejected independently so one typo cannot poison the entire menu.
+        const auto readInteger = [&](std::string_view key, int defaultValue, int minimum, int maximum) {
+            const auto raw = ReadNumber(j, { "skill_allocation", std::string(key) }, defaultValue);
+            const auto validated = raw.invalid
+                ? UIRules::IntegerValidation{ defaultValue, true }
+                : UIRules::ValidateInteger(raw.value, defaultValue, minimum, maximum);
+            if (raw.present && validated.replaced) {
+                logger::warn("[EA] Config: skill_allocation.{} must be an integer from {} through {}; using default {}.",
+                    key, minimum, maximum, defaultValue);
+            }
+            return validated.value;
+        };
+        const auto readGap = [&](std::string_view key, int defaultValue, int minimum = 0, int maximum = 120) {
+            return readInteger(key, defaultValue, minimum, maximum);
+        };
+
+        skillPointsPerLevel = readInteger("points_per_level", kDefaultSkillPointsPerLevel, 0, 1000);
+        const auto rawCap = ReadNumber(j, { "skill_allocation", "skill_cap" }, kDefaultSkillCap);
+        const auto validatedCap = rawCap.invalid
+            ? UIRules::FloatValidation{ kDefaultSkillCap, true }
+            : UIRules::ValidateFloat(rawCap.value, kDefaultSkillCap, 1.0f, 1000.0f);
+        skillCap = validatedCap.value;
+        if (rawCap.present && validatedCap.replaced) {
+            logger::warn("[EA] Config: skill_allocation.skill_cap must be finite and from 1 through 1000; using default {:.1f}.",
+                kDefaultSkillCap);
+        }
+
+        menuPanelWidth = readInteger("panel_width", kDefaultMenuPanelWidth, 480, 1280);
+        const auto rawHeight = ReadNumber(j, { "skill_allocation", "panel_height" }, kDefaultMenuPanelHeight);
+        const auto validatedHeight = rawHeight.invalid
+            ? UIRules::IntegerValidation{ kDefaultMenuPanelHeight, true }
+            : UIRules::ValidatePanelHeight(rawHeight.value, kDefaultMenuPanelHeight);
+        menuPanelHeight = validatedHeight.value;
+        if (rawHeight.present && validatedHeight.replaced) {
+            logger::warn("[EA] Config: skill_allocation.panel_height must be 0 or an integer from 300 through 720; using default {}.",
+                kDefaultMenuPanelHeight);
+        }
+        menuPanelYOffset = readInteger("panel_y_offset", kDefaultMenuPanelYOffset, -360, 360);
+        menuSkillRowGap = readInteger("row_gap", kDefaultMenuSkillRowGap, 24, 72);
+        menuSkillColumnGap = readInteger("column_gap", kDefaultMenuSkillColumnGap, 0, 200);
+        menuSkillLabelValueGap = readGap("label_value_gap", kDefaultMenuSkillLabelValueGap);
+        menuSkillValueArrowGap = readGap("value_arrow_gap", kDefaultMenuSkillValueArrowGap);
+        menuSkillButtonTopGap = readGap("button_top_gap", kDefaultMenuSkillButtonTopGap);
+        menuSkillButtonRowOffset = readInteger("button_row_offset", kDefaultMenuSkillButtonRowOffset, -72, 120);
+        menuSkillButtonGap = readGap("button_gap", kDefaultMenuSkillButtonGap);
+        menuFontSize = readInteger("font_size", kDefaultMenuFontSize, 8, 40);
+        menuHeaderFontSize = readInteger("header_font_size", kDefaultMenuHeaderFontSize, 10, 48);
 
         // New game
         resetSkillsOnNewGame = ReadBool(j, {"reset_skills_on_new_game"}, resetSkillsOnNewGame);
@@ -272,24 +416,26 @@ namespace EA::Config {
             skillPointsPerLevel, menuPanelWidth, menuPanelHeight, menuPanelYOffset,
             menuSkillRowGap, menuSkillColumnGap, menuSkillLabelValueGap, menuSkillValueArrowGap,
             menuSkillButtonTopGap, menuSkillButtonGap, menuFontSize, menuHeaderFontSize);
-        logger::info("[EA] Config: Skill cap — {:.1f}", skillCap);
+        logger::info("[EA] Config: Skill cap - {:.1f}", skillCap);
         logger::info("[EA] Config: max_log_files={}", maxLogFiles);
         logger::info("[EA] Config: notifications_enabled={}", notificationsEnabled);
         logger::info("[EA] Config: reset_skills_on_new_game={}", resetSkillsOnNewGame);
 
-        // Dump the entire raw JSON to the log for a complete session config record
-        try {
-            std::ifstream dumpFile(configPath);
-            if (dumpFile.is_open()) {
-                logger::info("[EA] Config: --- BEGIN SimpleAlternateLevelling.json ---");
-                std::string line;
-                while (std::getline(dumpFile, line)) {
-                    logger::info("[EA] Config: {}", line);
+        // Dump the raw JSON only for explicitly verbose diagnostic sessions.
+        if (verbose) {
+            try {
+                std::ifstream dumpFile(configPath);
+                if (dumpFile.is_open()) {
+                    logger::info("[EA] Config: --- BEGIN SimpleAlternateLevelling.json ---");
+                    std::string line;
+                    while (std::getline(dumpFile, line)) {
+                        logger::info("[EA] Config: {}", line);
+                    }
+                    logger::info("[EA] Config: --- END SimpleAlternateLevelling.json ---");
                 }
-                logger::info("[EA] Config: --- END SimpleAlternateLevelling.json ---");
+            } catch (...) {
+                logger::warn("[EA] Config: Could not dump JSON contents to log.");
             }
-        } catch (...) {
-            logger::warn("[EA] Config: Could not dump JSON contents to log.");
         }
     }
 }

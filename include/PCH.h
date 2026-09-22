@@ -1,11 +1,14 @@
 #pragma once
 
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
 #include <RE/Skyrim.h>
 #include <SKSE/SKSE.h>
 
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/basic_file_sink.h>
-#include <spdlog/sinks/dist_sink.h>
 
 #include <unordered_set>
 

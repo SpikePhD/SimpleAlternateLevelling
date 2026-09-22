@@ -2,4 +2,5 @@
 
 namespace EA::EventSinks {
     void Register();
+    void ResetRewardState();
 }

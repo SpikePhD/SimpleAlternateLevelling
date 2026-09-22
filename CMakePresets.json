@@ -1,0 +1,78 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "portable-tests",
+      "displayName": "Portable dependency-free tests",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "cacheVariables": {
+        "SAL_BUILD_PLUGIN": "OFF",
+        "BUILD_TESTS": "ON"
+      }
+    },
+    {
+      "name": "windows-release",
+      "displayName": "Windows Release plugin",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+      "cacheVariables": {
+        "SAL_BUILD_PLUGIN": "ON",
+        "BUILD_TESTS": "OFF",
+        "VCPKG_TARGET_TRIPLET": "x64-windows-static-md"
+      }
+    },
+    {
+      "name": "windows-release-tests",
+      "displayName": "Windows Release plugin and tests",
+      "inherits": "windows-release",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "cacheVariables": {
+        "BUILD_TESTS": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "portable-tests",
+      "configurePreset": "portable-tests",
+      "configuration": "Release"
+    },
+    {
+      "name": "windows-release",
+      "configurePreset": "windows-release",
+      "configuration": "Release"
+    },
+    {
+      "name": "windows-release-tests",
+      "configurePreset": "windows-release-tests",
+      "configuration": "Release"
+    },
+    {
+      "name": "windows-package",
+      "configurePreset": "windows-release-tests",
+      "configuration": "Release",
+      "targets": [ "package_mod" ]
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "portable-tests",
+      "configurePreset": "portable-tests",
+      "configuration": "Release",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "windows-release-tests",
+      "configurePreset": "windows-release-tests",
+      "configuration": "Release",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}

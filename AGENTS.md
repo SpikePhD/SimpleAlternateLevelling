@@ -13,19 +13,22 @@ grinding individual skills. Skill XP is intercepted and discarded at the engine 
 
 ```text
 SKSEPluginLoad()
-├── InitializeLog()          - timestamped spdlog, mirrored to Logs/ + SKSE/Spike/
+├── InitializeLog()          - timestamped spdlog in the standard SKSE log directory
 ├── Config::Load()           - reads SimpleAlternateLevelling.json immediately
-├── Serialization callbacks  - cosave v5: persists s_currentXP + skillsNormalized
+├── Serialization callbacks  - cosave v6: persists pendingSkillPoints + skillsNormalized;
+│                              native PlayerSkills::xp remains owned by Skyrim
 └── MessagingInterface kDataLoaded
     ├── SkillHook::Install()          - trampolines into PlayerCharacter::AddSkillExperience
     │                                   (discards all organic skill XP) and
     │                                   TESObjectBOOK::Activate (book XP via deferred task)
     ├── EventSinks::Register()        - BSTEventSink registrations:
-    │   ├── TESTrackedStatsEvent      - locations, dungeons, locks, skill books,
-    │   │                               misc quests, pickpocket, level-up threshold clamp
-    │   ├── TESDeathEvent             - kill XP, per-type (keyword-based), level-delta bonus
-    │   ├── TESQuestStageEvent        - quest completion XP by type (main/side/faction/...)
-    │   └── TESLockChangedEvent       - caches lock difficulty for the "Locks Picked" handler
+    │   ├── TESTrackedStatsEvent      - lock-success counter plus diagnostics only
+    │   ├── ActorKill::Event          - player/player-commanded kill XP by type and level delta
+    │   ├── QuestStatus::Event        - exact quest completion lifecycle (start/reset rearms)
+    │   ├── ObjectiveState::Event     - exact misc-objective completion transitions
+    │   ├── ItemsPickpocketed::Event  - one base reward per successful event
+    │   ├── MenuOpenCloseEvent        - captures lock target/tier before lockpicking
+    │   └── LevelIncrease::Event      - defers capped threshold refresh until level finalizes
     ├── CharCreateWatcher             - MenuOpenCloseEvent sink; fires NormalizeSkills after
     │                                   "RaceSex Menu" or "RaceMenu" closes on a new game
     └── GameSettingCollection         - overrides fXPLevelUpBase + fXPLevelUpMult to match
@@ -40,11 +43,33 @@ SKSEPluginLoad()
 |---|---|
 | `src/main.cpp` | Plugin entry, log init, cosave callbacks, kDataLoaded orchestration, CharCreateWatcher |
 | `src/Config.cpp` / `include/Config.h` | JSON loader; all XP values as `inline` globals |
-| `src/XPManager.cpp` / `include/XPManager.h` | `AwardXP()` (native XP bucket feed), kill/quest dedup guards, cosave accessors |
+| `src/XPManager.cpp` / `include/XPManager.h` | `AwardXP()` (native XP bucket feed), kill/quest dedup guards, mod-owned pending points |
+| `src/Progression.cpp` / `include/Progression.h` | Pure curve validation/threshold calculation and versioned cosave codec |
+| `src/RewardRules.cpp` / `include/RewardRules.h` | Dependency-free reward eligibility, lifecycle, arithmetic, and marker/lock mappings |
+| `src/Leveling.cpp` / `include/Leveling.h` | Game-setting synchronization and finalized-level threshold refresh |
+| `src/UIRules.cpp` / `include/UIRules.h` | Dependency-free UI validation and transactional allocation session rules |
 | `src/SkillHook.cpp` / `include/SkillHook.h` | `write_branch<5>` hooks: AddSkillExperience (discard), TESObjectBOOK::Activate (book XP) |
+| `src/SkillMenu.cpp` / `include/SkillMenu.h` | Validated Scaleform boundary, menu lifecycle, preview/commit transaction, vanilla continuation |
 | `src/EventSinks.cpp` / `include/EventSinks.h` | All BSTEventSink structs + `Register()` |
 | `include/PCH.h` | Precompiled header: RE/Skyrim.h, SKSE, spdlog sinks, std includes |
 | `data/SKSE/Plugins/SimpleAlternateLevelling.json` | Runtime config (XP values, leveling curve, debug flags) |
+
+### Skill allocation flow
+
+```text
+Vanilla LevelUp Menu opens
+  -> MenuOpenCloseEvent defers and hides it
+  -> SkillMenu snapshots the 18 native skill values
+  -> mouse/keyboard allocations update preview deltas only
+  -> Reset clears deltas without touching native actor values
+  -> Confirm/C/Escape revalidates the snapshot and commits once
+  -> unspent points are stored and the vanilla LevelUp Menu opens once
+```
+
+The menu state machine is `Idle -> Opening -> Active -> Committing -> Closing`.
+Every Scaleform callback must originate from the active movie, have the exact argument
+shape, and identify one of the 18 whitelisted skills. Load, revert, and new-game paths
+invalidate all deferred menu, normalization, reward, and threshold work.
 
 ### XP flow
 
@@ -55,34 +80,42 @@ Action in game
       -> skills->data->xp += amount          (native engine XP bucket)
       -> engine checks xp >= levelThreshold  (every tick, natively)
       -> AdvanceLevel() fires natively       (attribute screen, perk point, overflow carry)
-  -> "Level Increases" TrackedStat fires
-      -> clamp levelThreshold to xpCap
+  -> LevelIncrease::Event fires
+      -> deferred task reads the finalized player level
+      -> write the centrally calculated, capped levelThreshold
 ```
 
 ### Leveling formula
 
 ```text
-threshold(level) = min(xpCap, xpBase + level * xpIncrease)
+threshold(level) = min(xpCap, xpBase + max(level, 1) * xpIncrease)
 ```
 
 `xpBase` -> `fXPLevelUpBase`, `xpIncrease` -> `fXPLevelUpMult`.
-Written to both the game setting and `skills->data->levelThreshold` on kDataLoaded
-and on each cosave load. The stored threshold is not retroactively updated by game
-setting changes alone - it must be written directly.
+The threshold calculation uses double-precision intermediate arithmetic. The curve is
+written to the game settings, and the result is written directly to
+`skills->data->levelThreshold` on data load, cosave load, new game, and after each finalized
+level increase. The stored threshold is not retroactively updated by game setting changes.
 
 ### Cosave
 
-- Record ID: `EAXP`, version 5
-- Payload: `float` cumulative XP + `int` pendingSkillPoints + `uint8` skillsNormalized
-- On load: restores `skills->data->xp` and recalculates `levelThreshold`
-- v1-v4 fields are intentionally not read
+- Record ID: `EAXP`, version 6
+- Payload: exactly five bytes: little-endian `int32 pendingSkillPoints` + `uint8 skillsNormalized`
+- Native `PlayerSkills::xp` is never serialized by the plugin and is never assigned during
+  cosave load or revert; Skyrim's main save remains the sole XP authority
+- v1-v5 records are accepted at their exact historical lengths; legacy XP is ignored while
+  pending points and normalization are migrated where those versions contain them
+- The first valid `EAXP` record wins; missing, corrupt, duplicate, or unknown records cannot
+  overwrite native XP and fall back to safe plugin-owned defaults
+- v6 is forward-only: back up saves before upgrading; loading a v6 cosave with the old v5 DLL
+  is unsupported
 
-### Hook addresses (AE 1.6.1170)
+### Hook addresses (SE/AE)
 
 | Function | RELOCATION_ID / VTABLE | AE ID | Hook type |
 |---|---|---|---|
-| `PlayerCharacter::AddSkillExperience` | `RELOCATION_ID(39413, 40488)` | 40488 | `write_branch<5>` |
-| `TESObjectBOOK::Activate` | `VTABLE_TESObjectBOOK[0]` (AE 189577) slot 37 | - | `write_vfunc` |
+| `PlayerCharacter::AddSkillExperience` | `RELOCATION_ID(39413, 40488)` | 39413 / 40488 | `write_branch<5>` |
+| `TESObjectBOOK::Activate` | `VTABLE_TESObjectBOOK[0]` slot `0x37` | runtime Address Library | `write_vfunc` |
 
 `AddSkillExperienceHook` uses the default trampoline (64 bytes, about 14 bytes used).
 `BookActivateHook` patches the vtable directly, so it does not consume trampoline bytes.
@@ -99,28 +132,28 @@ is collision-free. `IsRead()` is still false inside `Activate` before the origin
   not retroactively update it. Write directly in `OnDataLoaded` and `OnGameLoad`.
 - `RE::DebugNotification` must not be called from inside `TESObjectBOOK::Activate`'s call stack;
   defer via `SKSE::GetTaskInterface()->AddTask()`.
-- `"Books Read"` TrackedStat is dead in AE 1.6.1170. Use `TESObjectBOOK::Activate` vtable hook.
+- `"Books Read"` TrackedStat is unreliable in AE. Use `TESObjectBOOK::Activate` vtable hook.
 - `"Skill Books Read"` TrackedStat fires for skill books in AE; `"Books Read"` does not.
-- Misc quests never set `IsCompleted()`. Award their XP from `"Misc Objectives Completed"` only.
+- Misc quests never set `IsCompleted()`. Award objective XP from exact
+  `ObjectiveState::Event` transitions; the tracked stat is diagnostic only.
+- Capture lock difficulty when `Lockpicking Menu` opens. Once the reference unlocks, its
+  tier is no longer a reliable source for the `"Locks Picked"` success event.
+- `QuestStatus::Event` is the quest reward authority. Completion awards once, while started
+  and reset signals rearm repeatable quests.
 - `QUEST_DATA::Type::kCompanions` does not exist. Use `kCompanionsQuest`.
 - `TESActorValueChangeEvent` and `TESPerkEntryRunEvent` have no struct definitions in this
   CommonLibSSE-NG build; those sinks are commented out.
 
 ## Build
 
-```bash
-cmake -B build -S . \
-  "-DCMAKE_TOOLCHAIN_FILE=C:/Program Files/Microsoft Visual Studio/2022/Community/VC/vcpkg/scripts/buildsystems/vcpkg.cmake" \
-  -DVCPKG_TARGET_TRIPLET=x64-windows-static-md \
-  -DCMAKE_BUILD_TYPE=Release \
-  "-DSKYRIM_PATH=C:/Modlist/NGVO/mods/Simple Alternate Levelling" \
-  -DBUILD_TESTS=OFF
-
-cmake --build build --config Release
+```powershell
+cmake --preset windows-release-tests
+cmake --build --preset windows-release-tests
+ctest --preset windows-release-tests
 ```
 
-DLL is auto-copied to `C:\Modlist\NGVO\mods\Simple Alternate Levelling\SKSE\Plugins\`
-on a successful build.
+Set `VCPKG_ROOT` before configuring. Clone with `--recurse-submodules` or run
+`git submodule update --init --recursive` before the first plugin build.
 
 Critical build/runtime note:
 
@@ -129,52 +162,35 @@ Critical build/runtime note:
 - Keep `CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"` set before
   `project()` so the plugin matches the triplet's `/MD` runtime.
 - Do not use `x64-windows` for this project.
+- The plugin targets AE 1.7.104 and supports SE/AE runtimes that provide matching SKSE
+  and Address Library data. Skyrim VR is disabled; unsupported storefronts are rejected.
 
-## Paths
+For dependency-free tests on any supported development OS:
 
-| Thing | Path |
-|---|---|
-| Source | `C:\Users\lucac\Documents\MyProjects\Simple Alternate Levelling\` |
-| Build output | `build\Release\SimpleAlternateLevelling.dll` |
-| Deploy target | `C:\Modlist\NGVO\mods\Simple Alternate Levelling\SKSE\Plugins\` |
-| SKSE log (game) | `Documents\My Games\Skyrim Special Edition\SKSE\Spike\SimpleAlternateLevelling_<ts>.log` |
-| Dev log mirror | `<project root>\Logs\SimpleAlternateLevelling_<ts>.log` |
-| Config (game) | `<Skyrim>\Data\SKSE\Plugins\SimpleAlternateLevelling.json` |
+```sh
+cmake --preset portable-tests
+cmake --build --preset portable-tests
+ctest --preset portable-tests
+```
 
-## Environment
+`cmake --build --preset windows-package` writes a deterministic, mod-manager-ready ZIP
+and SHA-256 file into the ignored repository `Deployed/` folder. For optional local MO2
+deployment during plugin builds, use an ignored `CMakeUserPresets.json` to set
+`SAL_DEPLOY_DIR`; never add local absolute paths to tracked CMake files or documentation.
+The deprecated `SKYRIM_PATH` cache variable is accepted only as a compatibility alias.
 
-The development machine has the following tools on PATH:
+The committed `data/Interface/EA_SkillMenu.swf` is rebuilt explicitly from
+`assets/swf_src/scripts/frame_1/DoAction.as` with Java 17 and FFDec 25.1.3. Set
+`SAL_JAVA_EXECUTABLE` and `SAL_FFDEC_JAR`, then use the `rebuild_skill_menu` and
+`verify_skill_menu` targets. Normal plugin builds do not require the SWF toolchain.
 
-- CMake - `C:\Program Files\CMake\bin`
-- Papyrus compiler - `C:\Modlist\papyrus-compiler` and `C:\Modlist\papyrus-compiler\Original Compiler`
-- FFDec - `C:\Program Files (x86)\FFDec`
-
-## NGVO modlist tools
-
-These are launched through MO2 so they see the virtual data folder:
-
-| Tool | Path | Use |
-|---|---|---|
-| SSEEdit 64 | `tools\SSEEdit\SSEEdit64.exe` | Inspect FormIDs, verify records, build conflict reports, run edit scripts |
-| SSEDump 64 | `tools\SSEEdit\SSEDump64.exe` | CLI record dump |
-| Synthesis | `tools\Synthesis\Synthesis.exe` | Patcher pipeline |
-| Cathedral Assets Optimizer | `tools\Cathedral Assets Optimizer\` | Texture/mesh optimization, BSA packing |
-| NifSkope | `tools\Nifskope Dev 8 [Pre-Release]\` | Inspect/edit `.nif` mesh files |
-| NIF Optimizer | `tools\NIF Optimizer\` | Batch-optimize NIF meshes for SSE |
-| LOOT | `tools\LOOT\` | Plugin load order sorting |
-| DynDOLOD | `tools\DynDOLOD\` | Dynamic distant LOD generation |
-| xLODGen | `tools\xLODGen\` | Terrain/object LOD generation |
-| zEdit | `tools\zEdit\` | Merge plugins, apply zPatch rules |
-| BethINI | `tools\BethINI\` | INI editor with SSE presets |
-| EasyNPC | `tools\EasyNPC\` | NPC appearance conflict resolution |
-| Vram Texture Analyzer | `tools\Vram Texture Analyzer\` | Texture VRAM usage profiling |
-| PGPatcher / PCA | `tools\PGPatcher\`, `tools\PCA\` | Particle/physics patchers |
+Build artifacts are under `out/build/<preset>/`. Runtime logs are written directly to the
+standard SKSE log directory. `debug.max_log_files=0` disables deletion; valid limits are
+integers through 1000.
 
 ## Json for testing
 
-Make sure that the deployed config JSON at
-`C:\Modlist\NGVO\mods\Simple Alternate Levelling\SKSE\Plugins\SimpleAlternateLevelling.json`
-has the following:
+The local deployed test configuration must retain the following values:
 
 ```json
 {
