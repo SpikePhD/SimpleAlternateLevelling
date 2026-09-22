@@ -162,8 +162,9 @@ Critical build/runtime note:
 - Keep `CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"` set before
   `project()` so the plugin matches the triplet's `/MD` runtime.
 - Do not use `x64-windows` for this project.
-- The plugin targets AE 1.7.104 and supports SE/AE runtimes that provide matching SKSE
-  and Address Library data. Skyrim VR is disabled; unsupported storefronts are rejected.
+- The plugin targets AE 1.7.104 and uses the post-1.6.629 structure layout. It supports
+  non-VR SE/AE runtimes at 1.6.629 or later when matching SKSE and Address Library data
+  are available. Earlier runtimes and VR are unsupported; unsupported storefronts are rejected.
 
 For dependency-free tests on any supported development OS:
 

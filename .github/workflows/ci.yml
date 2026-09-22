@@ -70,10 +70,7 @@ jobs:
       - name: Verify runtime metadata and imports
         shell: pwsh
         run: |
-          $generated = "out/build/windows-release-tests/__SimpleAlternateLevellingPlugin.cpp"
-          if (-not (Select-String -Path $generated -SimpleMatch "SKSE::VersionIndependence::AddressLibrary" -Quiet)) {
-            throw "Generated plugin metadata is not Address Library version independent."
-          }
+          python tools/verify_plugin_metadata.py --dll out/build/windows-release-tests/Release/SimpleAlternateLevelling.dll
           $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
           $vs = & $vswhere -latest -products * -property installationPath
           $dumpbin = Get-ChildItem (Join-Path $vs "VC/Tools/MSVC") -Filter dumpbin.exe -Recurse | Select-Object -First 1 -ExpandProperty FullName

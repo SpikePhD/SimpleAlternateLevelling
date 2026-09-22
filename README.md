@@ -4,9 +4,10 @@ Simple Alternate Levelling is an SKSE plugin for Skyrim Special Edition and
 Anniversary Edition. It replaces skill-use leveling with XP awarded for world
 actions such as combat, quests, exploration, books, locks, and pickpocketing.
 
-The current release targets Skyrim AE runtime **1.7.104.0** and supports Skyrim
-SE **1.5.97** and AE **1.6.629+** where SKSE and the matching Address Library are
-available. Skyrim VR, Epic Store, Microsoft Store, and console builds are not
+The current release targets Skyrim runtime **1.7.104.0**. It is built for the
+post-1.6.629 structure layout and supports non-VR SE/AE runtimes in that range
+when matching SKSE and Address Library data are available. Runtimes earlier
+than 1.6.629, Skyrim VR, Epic Store, Microsoft Store, and console builds are not
 supported. Install the SKSE and Address Library versions matching your game
 runtime before installing this mod.
 

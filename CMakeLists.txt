@@ -104,6 +104,29 @@ if(SAL_BUILD_PLUGIN)
         SOURCES ${SAL_PLUGIN_SOURCES}
     )
 
+    # CommonLib's CMake helper marks struct compatibility as dependent but its
+    # generated RuntimeCompatibility initializer leaves SKSE's post-1.6.629
+    # structure-layout bit unset. SKSE 2.3.1 rejects that combination with
+    # "only compatible with versions earlier than 1.6.629". Set both the
+    # Address Library and post-629 layout flags in the exported metadata.
+    set(SAL_PLUGIN_METADATA_FILE "${CMAKE_CURRENT_BINARY_DIR}/__${PROJECT_NAME}Plugin.cpp")
+    file(READ "${SAL_PLUGIN_METADATA_FILE}" SAL_PLUGIN_METADATA)
+    set(SAL_UNPATCHED_RUNTIME_METADATA
+        ".RuntimeCompatibility = SKSE::VersionIndependence::AddressLibrary,")
+    set(SAL_PATCHED_RUNTIME_METADATA
+        ".RuntimeCompatibility = { SKSE::VersionIndependence::AddressLibrary, true },")
+    string(FIND "${SAL_PLUGIN_METADATA}" "${SAL_UNPATCHED_RUNTIME_METADATA}" SAL_UNPATCHED_RUNTIME_METADATA_OFFSET)
+    if(SAL_UNPATCHED_RUNTIME_METADATA_OFFSET EQUAL -1)
+        message(FATAL_ERROR "Unexpected CommonLib plugin metadata; cannot declare post-1.6.629 structure compatibility.")
+    endif()
+    string(REPLACE "${SAL_UNPATCHED_RUNTIME_METADATA}" "${SAL_PATCHED_RUNTIME_METADATA}"
+        SAL_PLUGIN_METADATA "${SAL_PLUGIN_METADATA}")
+    string(APPEND SAL_PLUGIN_METADATA
+        "\nconstexpr SKSE::PluginDeclaration::RuntimeCompatibility kSALRuntimeCompatibility{\n"
+        "    SKSE::VersionIndependence::AddressLibrary, true\n"
+        "};\nstatic_assert(kSALRuntimeCompatibility.Targets629Structs());\n")
+    file(WRITE "${SAL_PLUGIN_METADATA_FILE}" "${SAL_PLUGIN_METADATA}")
+
     target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_23)
     target_precompile_headers(${PROJECT_NAME} PRIVATE include/PCH.h)
     target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
