@@ -8,7 +8,7 @@
   },
 
   "debug": {
-    "verbose": true,
+    "verbose": false,
     "max_log_files": 10,
     "_comment_verbose": "Set true to enable trace logging (skill hook intercepts, event details). WARNING: generates large log files.",
     "_comment_max_log_files": "Maximum number of session logs to keep in the standard SKSE log directory (0 keeps all; valid range 0-1000)."
@@ -227,13 +227,13 @@
   },
 
   "leveling": {
-    "xp_base":     5.0,
-    "xp_increase": 1.0,
-    "xp_cap":      500.0,
+    "xp_base":     75.0,
+    "xp_increase": 25.0,
+    "xp_cap":      10000000.0,
     "_comment": "xp_base maps to fXPLevelUpBase, xp_increase to fXPLevelUpMult.",
     "_comment_formula": "threshold(level) = min(xp_cap, xp_base + level * xp_increase)",
-    "_comment_vanilla": "Vanilla defaults: xp_base=75, xp_increase=25 (no cap).",
-    "_comment_cap": "xp_cap clamps the threshold so leveling never becomes a chore at high levels.",
-    "_comment_testing": "For fast testing use xp_base=5, xp_increase=1, xp_cap=1000."
+    "_comment_vanilla": "Defaults match vanilla: xp_base=75, xp_increase=25, effectively uncapped.",
+    "_comment_cap": "Lower xp_cap to stop the threshold growing at high levels.",
+    "_comment_testing": "For fast testing, override xp_base=5, xp_increase=1 in SimpleAlternateLevelling.user.json."
   }
 }

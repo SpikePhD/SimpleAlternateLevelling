@@ -80,9 +80,9 @@ namespace EA::Config {
     inline float xpLockMaster     = 6.0f;
 
     // Leveling curve
-    inline constexpr float kDefaultXPBase     = 200.0f;
-    inline constexpr float kDefaultXPIncrease =  25.0f;
-    inline constexpr float kDefaultXPCap      = 1000.0f;
+    inline constexpr float kDefaultXPBase     = 75.0f;
+    inline constexpr float kDefaultXPIncrease = 25.0f;
+    inline constexpr float kDefaultXPCap      = 10000000.0f;
 
     inline float xpBase     = kDefaultXPBase;
     inline float xpIncrease = kDefaultXPIncrease;

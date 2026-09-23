@@ -251,6 +251,9 @@ if(BUILD_TESTS)
             --settings-actionscript "${CMAKE_CURRENT_SOURCE_DIR}/assets/settings_swf_src/scripts/frame_1/DoAction.as"
             --settings-swf "${CMAKE_CURRENT_SOURCE_DIR}/data/Interface/SAL_SettingsMenu.swf"
             --defaults "${CMAKE_CURRENT_SOURCE_DIR}/data/SKSE/Plugins/${PROJECT_NAME}.json")
+    add_test(NAME release_defaults
+        COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_release_defaults.py"
+            --defaults "${CMAKE_CURRENT_SOURCE_DIR}/data/SKSE/Plugins/${PROJECT_NAME}.json")
     if(SAL_BUILD_PLUGIN)
         add_executable(SimpleAlternateLevellingSettingsTests
             tests/SettingsModelTests.cpp src/SettingsModel.cpp src/Progression.cpp)

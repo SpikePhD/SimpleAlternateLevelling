@@ -213,10 +213,17 @@ integers through 1000.
 
 ## Json for testing
 
-The local deployed test configuration must retain the following values:
+The shipped `data/SKSE/Plugins/SimpleAlternateLevelling.json` must keep release
+defaults (`verbose=false`, vanilla-like curve `xp_base=75`, `xp_increase=25`, uncapped).
+Never commit test values there; it is packaged verbatim.
+
+For local testing, put the fast-test values in
+`SKSE/Plugins/SimpleAlternateLevelling.user.json` inside `SAL_DEPLOY_DIR`. The post-build
+deploy step overwrites the shipped JSON but never touches the user file:
 
 ```json
 {
+  "config_version": 2,
   "debug": {
     "verbose": true
   },
