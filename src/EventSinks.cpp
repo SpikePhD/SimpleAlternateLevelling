@@ -185,13 +185,51 @@ namespace EA::EventSinks {
             const RE::LocationCleared::Event*,
             RE::BSTEventSource<RE::LocationCleared::Event>*) override
         {
+            LogCurrentLocationFlags("event");
+
+            // The engine dispatches the event before it sets the location's
+            // cleared flags, so compare them on the next frame.
+            auto* tasks = SKSE::GetTaskInterface();
+            if (!tasks) {
+                logger::warn("[EA] Location clear: task interface unavailable; checking immediately.");
+                AwardNewlyClearedLocations();
+                return RE::BSEventNotifyControl::kContinue;
+            }
+            const auto generation = XPManager::GetRewardGeneration();
+            tasks->AddTask([generation]() {
+                if (XPManager::GetRewardGeneration() != generation) {
+                    logger::debug("[EA] Location clear: stale deferred check discarded after state reset.");
+                    return;
+                }
+                LogCurrentLocationFlags("deferred");
+                AwardNewlyClearedLocations();
+            });
+            return RE::BSEventNotifyControl::kContinue;
+        }
+
+    private:
+        static void LogCurrentLocationFlags(std::string_view stage)
+        {
+            auto* player = RE::PlayerCharacter::GetSingleton();
+            auto* location = player ? player->GetCurrentLocation() : nullptr;
+            if (!location) {
+                logger::info("[EA] Location clear ({}): player has no current location.", stage);
+                return;
+            }
+            auto* name = location->GetFullName();
+            logger::info("[EA] Location clear ({}): current='{}' ({:08X}) cleared={} everCleared={}.",
+                stage, name ? name : "", location->GetFormID(), location->cleared, location->everCleared);
+        }
+
+        static void AwardNewlyClearedLocations()
+        {
             if (!s_clearedLocations.Ready()) {
                 logger::warn("[EA] Location clear: no load-time snapshot; recording state without reward.");
             }
             const auto newlyCleared = s_clearedLocations.Observe(CollectEverClearedLocations());
             if (newlyCleared.empty()) {
-                logger::debug("[EA] Location clear: event had no newly cleared location; skipped.");
-                return RE::BSEventNotifyControl::kContinue;
+                logger::warn("[EA] Location clear: event had no newly ever-cleared location; skipped.");
+                return;
             }
 
             for (const auto locationID : newlyCleared) {
@@ -332,7 +370,6 @@ namespace EA::EventSinks {
                 logger::trace("[EA] TrackedStat (unhandled): '{}' = {}",
                               event->stat.c_str(), event->value);
             }
-            return RE::BSEventNotifyControl::kContinue;
         }
     };
 
