@@ -4,6 +4,7 @@
 #include <iostream>
 #include <limits>
 #include <string_view>
+#include <vector>
 
 namespace {
     int failures = 0;
@@ -29,6 +30,27 @@ namespace {
         lifecycle.Reset();
         Check(lifecycle.Observe(0x1234, QuestSignal::kCompleted), "global reset clears lifecycle");
         Check(!lifecycle.Observe(0, QuestSignal::kCompleted), "zero quest id rejected");
+    }
+
+    void TestClearedLocationTracker()
+    {
+        using EA::RewardRules::ClearedLocationTracker;
+        using Ids = std::vector<std::uint32_t>;
+        ClearedLocationTracker tracker;
+        Check(!tracker.Ready(), "tracker starts without a snapshot");
+        Check(tracker.Observe(Ids{ 0x10, 0x20 }).empty(), "observation without snapshot awards nothing");
+        Check(tracker.Ready(), "first observation becomes the baseline");
+        Check(tracker.Observe(Ids{ 0x10, 0x20, 0x30 }) == Ids{ 0x30 }, "remote clear detected by location");
+        Check(tracker.Observe(Ids{ 0x10, 0x20, 0x30 }).empty(), "same clear never awards twice");
+
+        tracker.Snapshot(Ids{ 0xA, 0xB });
+        Check(tracker.Observe(Ids{ 0xA, 0xB }).empty(), "locations cleared before load do not award");
+        Check(tracker.Observe(Ids{ 0xA, 0xB, 0xC, 0xD }) == (Ids{ 0xC, 0xD }), "simultaneous clears each award");
+        Check(tracker.Observe(Ids{ 0, 0xA }).empty(), "zero id ignored");
+
+        tracker.Invalidate();
+        Check(!tracker.Ready(), "invalidate clears readiness");
+        Check(tracker.Observe(Ids{ 0xA, 0xE }).empty(), "invalidated tracker does not mass-award");
     }
 
     void TestTransitionsAndEligibility()
@@ -96,6 +118,7 @@ namespace {
 int main()
 {
     TestQuestLifecycle();
+    TestClearedLocationTracker();
     TestTransitionsAndEligibility();
     TestKillRewards();
     TestMappings();

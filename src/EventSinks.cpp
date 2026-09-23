@@ -28,6 +28,7 @@ namespace EA::EventSinks {
 
     static std::optional<LockAttempt> s_lockAttempt;
     static std::optional<std::int32_t> s_lastLockCounter;
+    static RewardRules::ClearedLocationTracker s_clearedLocations;
 
     namespace {
         static std::string_view ClassifyMarkerType(RE::MARKER_TYPE type) {
@@ -160,32 +161,51 @@ namespace EA::EventSinks {
         }
     };
 
+    // LocationCleared::Event is empty, so the cleared location is found by
+    // diffing the game's ever-cleared flags against the load-time snapshot.
+    static std::vector<std::uint32_t> CollectEverClearedLocations()
+    {
+        std::vector<std::uint32_t> result;
+        auto* dataHandler = RE::TESDataHandler::GetSingleton();
+        if (!dataHandler) {
+            logger::warn("[EA] Location clear: TESDataHandler is null.");
+            return result;
+        }
+        for (const auto* location : dataHandler->GetFormArray<RE::BGSLocation>()) {
+            if (location && location->everCleared) {
+                result.push_back(location->GetFormID());
+            }
+        }
+        return result;
+    }
+
     struct OnLocationCleared : public RE::BSTEventSink<RE::LocationCleared::Event> {
         RE::BSEventNotifyControl ProcessEvent(
             const RE::LocationCleared::Event*,
             RE::BSTEventSource<RE::LocationCleared::Event>*) override
         {
-            auto* player = RE::PlayerCharacter::GetSingleton();
-            if (!player) {
+            if (!s_clearedLocations.Ready()) {
+                logger::warn("[EA] Location clear: no load-time snapshot; recording state without reward.");
+            }
+            const auto newlyCleared = s_clearedLocations.Observe(CollectEverClearedLocations());
+            if (newlyCleared.empty()) {
+                logger::debug("[EA] Location clear: event had no newly cleared location; skipped.");
                 return RE::BSEventNotifyControl::kContinue;
             }
 
-            auto* location = player->GetCurrentLocation();
-            if (!location) {
-                return RE::BSEventNotifyControl::kContinue;
+            for (const auto locationID : newlyCleared) {
+                auto* location = RE::TESForm::LookupByID<RE::BGSLocation>(locationID);
+                if (!location) {
+                    continue;
+                }
+                auto typeKey = ClassifyLocation(location);
+                auto reward = Config::GetReward(Config::locationClearingRewards, typeKey, Config::xpLocationCleared);
+                auto* name = location->GetFullName();
+                auto subject = (name && name[0]) ? name : "Location Cleared";
+
+                XPManager::AwardXP(reward,
+                    XPManager::MakeStatContext(subject, "location_cleared", 1, typeKey));
             }
-
-            if (!XPManager::RegisterLocationClear(location->GetFormID())) {
-                return RE::BSEventNotifyControl::kContinue;
-            }
-
-            auto typeKey = ClassifyLocation(location);
-            auto reward = Config::GetReward(Config::locationClearingRewards, typeKey, Config::xpLocationCleared);
-            auto* name = location->GetFullName();
-            auto subject = (name && name[0]) ? name : "Location Cleared";
-
-            XPManager::AwardXP(reward,
-                XPManager::MakeStatContext(subject, "location_cleared", 1, typeKey));
             return RE::BSEventNotifyControl::kContinue;
         }
     };
@@ -569,7 +589,15 @@ namespace EA::EventSinks {
         XPManager::ResetRewardGuards();
         s_lockAttempt.reset();
         s_lastLockCounter.reset();
+        s_clearedLocations.Invalidate();
         logger::debug("[EA] Transient reward state reset.");
+    }
+
+    void SnapshotClearedLocations(std::string_view reason) {
+        const auto everCleared = CollectEverClearedLocations();
+        s_clearedLocations.Snapshot(everCleared);
+        logger::info("[EA] Location clear: snapshot of {} ever-cleared locations taken (reason={}).",
+            everCleared.size(), reason);
     }
 
     void Register() {

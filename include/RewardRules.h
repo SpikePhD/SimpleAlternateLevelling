@@ -1,8 +1,10 @@
 #pragma once
 
 #include <cstdint>
+#include <span>
 #include <string_view>
 #include <unordered_set>
+#include <vector>
 
 namespace EA::RewardRules {
 
@@ -19,6 +21,27 @@ namespace EA::RewardRules {
 
     private:
         std::unordered_set<std::uint32_t> completed_;
+    };
+
+    // LocationCleared::Event carries no location, so rewards are derived from
+    // the set of ever-cleared locations: anything cleared since the snapshot
+    // taken at load/new game was just cleared. The ever-cleared flag lives in
+    // the save, so each location awards at most once per playthrough.
+    class ClearedLocationTracker {
+    public:
+        void Snapshot(std::span<const std::uint32_t> everCleared);
+        void Invalidate() noexcept;
+        [[nodiscard]] bool Ready() const noexcept { return ready_; }
+
+        // Returns locations newly ever-cleared since the last snapshot or
+        // observation. Without a snapshot it only records state, so a missed
+        // snapshot can never award every location already cleared in the save.
+        [[nodiscard]] std::vector<std::uint32_t> Observe(
+            std::span<const std::uint32_t> everCleared);
+
+    private:
+        std::unordered_set<std::uint32_t> known_;
+        bool                              ready_{ false };
     };
 
     [[nodiscard]] bool IsObjectiveCompletionTransition(

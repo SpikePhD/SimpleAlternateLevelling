@@ -28,6 +28,36 @@ namespace EA::RewardRules {
         completed_.clear();
     }
 
+    void ClearedLocationTracker::Snapshot(std::span<const std::uint32_t> everCleared)
+    {
+        known_.clear();
+        known_.insert(everCleared.begin(), everCleared.end());
+        ready_ = true;
+    }
+
+    void ClearedLocationTracker::Invalidate() noexcept
+    {
+        known_.clear();
+        ready_ = false;
+    }
+
+    std::vector<std::uint32_t> ClearedLocationTracker::Observe(
+        std::span<const std::uint32_t> everCleared)
+    {
+        if (!ready_) {
+            Snapshot(everCleared);
+            return {};
+        }
+
+        std::vector<std::uint32_t> newlyCleared;
+        for (const auto locationID : everCleared) {
+            if (locationID != 0 && known_.insert(locationID).second) {
+                newlyCleared.push_back(locationID);
+            }
+        }
+        return newlyCleared;
+    }
+
     bool IsObjectiveCompletionTransition(
         std::uint32_t oldState,
         std::uint32_t newState) noexcept

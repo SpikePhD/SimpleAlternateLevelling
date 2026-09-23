@@ -163,6 +163,9 @@ is collision-free. `IsRead()` is still false inside `Activate` before the origin
   references keep their FormID across cell respawns and `FF` IDs are recycled, so a
   session-long guard silently drops XP. Kills of the player's own commanded actors
   (summons, thralls, reanimated corpses) never award XP.
+- `LocationCleared::Event` is empty and does not identify the location. Rewards come from
+  diffing `BGSLocation::everCleared` against a snapshot taken on `kPostLoadGame` and
+  `kNewGame`, so each location awards once per playthrough, wherever the player is.
 - Call `SKSE::Init(a_skse, { .log = false })`. The default `InitInfo` creates CommonLib's
   own logger and replaces the timestamped session logger from `InitializeLog()`.
 - `QUEST_DATA::Type::kCompanions` does not exist. Use `kCompanionsQuest`.

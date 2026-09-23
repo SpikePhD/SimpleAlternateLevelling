@@ -47,9 +47,9 @@ namespace EA::XPManager {
     // and reset signals re-arm repeatable quests without awarding XP.
     bool ObserveQuestStatus(RE::FormID questID, RewardRules::QuestSignal signal);
 
-    // Location discovery/clearing deduplication guards.
+    // Location discovery deduplication guard. Location clears are tracked by
+    // EventSinks from the game's ever-cleared flags instead.
     bool RegisterLocationDiscovery(std::uintptr_t markerKey);
-    bool RegisterLocationClear(RE::FormID locationID);
 
     // Clears all transient reward guards and lifecycle state. Call for every
     // load, revert, and new game so state cannot leak between characters.

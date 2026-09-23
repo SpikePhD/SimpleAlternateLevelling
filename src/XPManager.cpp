@@ -23,7 +23,6 @@ namespace EA::XPManager {
     static std::unordered_set<RE::FormID> s_readBooks;
     static RewardRules::QuestLifecycle    s_questLifecycle;
     static std::unordered_set<std::uintptr_t> s_discoveredLocationMarkers;
-    static std::unordered_set<RE::FormID>     s_clearedLocations;
     static std::uint64_t                       s_rewardGeneration = 1;
 
     // -----------------------------------------------------------------------
@@ -110,23 +109,10 @@ namespace EA::XPManager {
         return true;
     }
 
-    bool RegisterLocationClear(RE::FormID locationID) {
-        if (locationID == 0) {
-            return false;
-        }
-        if (s_clearedLocations.contains(locationID)) {
-            logger::debug("[EA] Location clear guard: FormID {:08X} already awarded - skipped.", locationID);
-            return false;
-        }
-        s_clearedLocations.insert(locationID);
-        return true;
-    }
-
     void ResetRewardGuards() {
         s_readBooks.clear();
         s_questLifecycle.Reset();
         s_discoveredLocationMarkers.clear();
-        s_clearedLocations.clear();
         ++s_rewardGeneration;
         if (s_rewardGeneration == 0) {
             s_rewardGeneration = 1;
