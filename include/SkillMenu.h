@@ -9,4 +9,9 @@ namespace EA::SkillMenu {
     void Confirm();
     void ResetAllocations();
     void ResetState();
+
+    // True while a vanilla LevelUp Menu has been intercepted and its
+    // continuation has not reopened it yet. Its interim close is not the
+    // end of the level-up.
+    [[nodiscard]] bool IsDeferringVanillaLevelUp();
 }

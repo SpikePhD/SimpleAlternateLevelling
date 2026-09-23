@@ -4,6 +4,7 @@
 #include "Config.h"
 #include "Leveling.h"
 #include "RewardRules.h"
+#include "SkillMenu.h"
 #include "RE/A/ActorKill.h"
 #include "RE/E/ExtraMapMarker.h"
 #include "RE/I/ItemsPickpocketed.h"
@@ -405,9 +406,35 @@ namespace EA::EventSinks {
                 return RE::BSEventNotifyControl::kContinue;
             }
 
-            Leveling::QueueThresholdRefresh(
-                static_cast<std::uint32_t>(event->newLevel),
-                "level-increase");
+            // Do not write the threshold here. The engine subtracts the
+            // current threshold from native XP only when the LevelUp Menu
+            // completes; changing it now makes that subtraction use the next
+            // level's value (120 XP at threshold 100 became -5, not 20).
+            logger::info("[EA] Level increase to {}; threshold refresh deferred until the LevelUp Menu closes.",
+                event->newLevel);
+            return RE::BSEventNotifyControl::kContinue;
+        }
+    };
+
+    // Applies the capped threshold after the engine has finished the level-up
+    // (XP overflow carried and its own threshold recalculated). The interim
+    // close of an intercepted LevelUp Menu is skipped.
+    struct OnLevelUpMenu : public RE::BSTEventSink<RE::MenuOpenCloseEvent> {
+        RE::BSEventNotifyControl ProcessEvent(
+            const RE::MenuOpenCloseEvent*                  event,
+            RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
+        {
+            if (!event || event->opening || event->menuName != RE::LevelUpMenu::MENU_NAME) {
+                return RE::BSEventNotifyControl::kContinue;
+            }
+            if (SkillMenu::IsDeferringVanillaLevelUp()) {
+                logger::debug("[EA] LevelUp Menu interim close during skill allocation; threshold unchanged.");
+                return RE::BSEventNotifyControl::kContinue;
+            }
+
+            auto* player = RE::PlayerCharacter::GetSingleton();
+            const auto level = player ? static_cast<std::uint32_t>(player->GetLevel()) : 0u;
+            Leveling::QueueThresholdRefresh(level, "level-up-menu-closed");
             return RE::BSEventNotifyControl::kContinue;
         }
     };
@@ -584,6 +611,7 @@ namespace EA::EventSinks {
     static OnObjectiveState s_objectiveSink;
     static OnItemsPickpocketed s_pickpocketSink;
     static OnLockpickingMenu s_lockpickingMenuSink;
+    static OnLevelUpMenu s_levelUpMenuSink;
 
     void ResetRewardState() {
         XPManager::ResetRewardGuards();
@@ -675,6 +703,8 @@ namespace EA::EventSinks {
         if (auto* ui = RE::UI::GetSingleton()) {
             ui->AddEventSink(&s_lockpickingMenuSink);
             logger::info("[EA] EventSinks: [9/9] Lockpicking Menu event sink registered.");
+            ui->AddEventSink(&s_levelUpMenuSink);
+            logger::info("[EA] EventSinks: LevelUp Menu close sink registered for threshold refresh.");
         } else {
             logger::error("[EA] EventSinks: UI singleton is null; lock context unavailable.");
         }

@@ -192,9 +192,17 @@ namespace EA::XPManager {
         }
 
         float systemXPBefore = skills->data->xp;
-        if (!std::isfinite(systemXPBefore) || systemXPBefore < 0.0f) {
-            logger::error("[EA] AwardXP: native XP bucket is invalid ({}); award rejected.", systemXPBefore);
+        if (!std::isfinite(systemXPBefore)) {
+            logger::error("[EA] AwardXP: native XP bucket is invalid ({}); award from source '{}' rejected.",
+                systemXPBefore, context.sourceKey);
             return;
+        }
+        if (systemXPBefore < 0.0f) {
+            // Saves made with the pre-fix level-up timing can hold a negative
+            // bucket. Rejecting forever would stop all progression, so repair it.
+            logger::warn("[EA] AwardXP: native XP bucket was negative ({:.1f}); reset to 0 before award from source '{}'.",
+                systemXPBefore, context.sourceKey);
+            systemXPBefore = 0.0f;
         }
 
         const float systemXPAfter = systemXPBefore + amount;

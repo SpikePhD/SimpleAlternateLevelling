@@ -28,7 +28,8 @@ SKSEPluginLoad()
     │   ├── ObjectiveState::Event     - exact misc-objective completion transitions
     │   ├── ItemsPickpocketed::Event  - one base reward per successful event
     │   ├── MenuOpenCloseEvent        - captures lock target/tier before lockpicking
-    │   └── LevelIncrease::Event      - defers capped threshold refresh until level finalizes
+    │   ├── LevelIncrease::Event      - diagnostic only; never writes the threshold
+    │   └── MenuOpenCloseEvent        - LevelUp Menu close writes the capped threshold
     ├── CharCreateWatcher             - MenuOpenCloseEvent sink; fires NormalizeSkills after
     │                                   "RaceSex Menu" or "RaceMenu" closes on a new game
     └── GameSettingCollection         - overrides fXPLevelUpBase + fXPLevelUpMult to match
@@ -99,10 +100,15 @@ Action in game
       -> skills->data->xp += amount          (native engine XP bucket)
       -> engine checks xp >= levelThreshold  (every tick, natively)
       -> AdvanceLevel() fires natively       (attribute screen, perk point, overflow carry)
-  -> LevelIncrease::Event fires
-      -> deferred task reads the finalized player level
-      -> write the centrally calculated, capped levelThreshold
+  -> LevelIncrease::Event fires             (log only: XP has NOT been deducted yet)
+  -> LevelUp Menu completes: engine does xp -= levelThreshold, recalculates threshold
+  -> LevelUp Menu close (not the interim close of an intercepted menu)
+      -> deferred task writes the centrally calculated, capped levelThreshold
 ```
+
+Never write `levelThreshold` between `LevelIncrease::Event` and the LevelUp Menu closing.
+The engine subtracts whatever threshold is current at completion; writing the next
+level's value early turned 120 XP at threshold 100 into -5 instead of 20.
 
 ### Leveling formula
 
@@ -113,8 +119,8 @@ threshold(level) = min(xpCap, xpBase + max(level, 1) * xpIncrease)
 `xpBase` -> `fXPLevelUpBase`, `xpIncrease` -> `fXPLevelUpMult`.
 The threshold calculation uses double-precision intermediate arithmetic. The curve is
 written to the game settings, and the result is written directly to
-`skills->data->levelThreshold` on data load, cosave load, new game, and after each finalized
-level increase. The stored threshold is not retroactively updated by game setting changes.
+`skills->data->levelThreshold` on data load, cosave load, new game, and after each
+LevelUp Menu closes. The stored threshold is not retroactively updated by game setting changes.
 
 ### Cosave
 

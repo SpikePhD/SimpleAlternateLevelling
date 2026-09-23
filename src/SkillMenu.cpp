@@ -529,6 +529,11 @@ namespace EA::SkillMenu {
             s_session.RemainingPoints());
     }
 
+    bool IsDeferringVanillaLevelUp()
+    {
+        return s_deferredLevelUp;
+    }
+
     void ResetState()
     {
         s_generation.fetch_add(1);
