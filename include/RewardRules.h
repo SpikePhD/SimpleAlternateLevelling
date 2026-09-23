@@ -23,21 +23,22 @@ namespace EA::RewardRules {
         std::unordered_set<std::uint32_t> completed_;
     };
 
-    // LocationCleared::Event carries no location, so rewards are derived from
-    // the set of ever-cleared locations: anything cleared since the snapshot
-    // taken at load/new game was just cleared. The ever-cleared flag lives in
-    // the save, so each location awards at most once per playthrough.
-    class ClearedLocationTracker {
+    // Detects forms whose saved, one-way game flag was set since a snapshot
+    // taken at load/new game: ever-cleared locations and read books. Used
+    // where events do not identify the form (LocationCleared::Event is empty,
+    // inventory reading bypasses TESObjectBOOK::Activate). The flags live in
+    // the save, so each form awards at most once per playthrough.
+    class NewlyFlaggedTracker {
     public:
-        void Snapshot(std::span<const std::uint32_t> everCleared);
+        void Snapshot(std::span<const std::uint32_t> flagged);
         void Invalidate() noexcept;
         [[nodiscard]] bool Ready() const noexcept { return ready_; }
 
-        // Returns locations newly ever-cleared since the last snapshot or
-        // observation. Without a snapshot it only records state, so a missed
-        // snapshot can never award every location already cleared in the save.
+        // Returns forms newly flagged since the last snapshot or observation.
+        // Without a snapshot it only records state, so a missed snapshot can
+        // never award every form already flagged in the save.
         [[nodiscard]] std::vector<std::uint32_t> Observe(
-            std::span<const std::uint32_t> everCleared);
+            std::span<const std::uint32_t> flagged);
 
     private:
         std::unordered_set<std::uint32_t> known_;
@@ -47,11 +48,6 @@ namespace EA::RewardRules {
     [[nodiscard]] bool IsObjectiveCompletionTransition(
         std::uint32_t oldState,
         std::uint32_t newState) noexcept;
-
-    [[nodiscard]] bool ShouldRewardBook(
-        bool activationSucceeded,
-        bool playerActivated,
-        bool alreadyRead) noexcept;
 
     [[nodiscard]] bool ShouldRewardPickpocket(std::int32_t numItems) noexcept;
 

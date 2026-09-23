@@ -28,34 +28,34 @@ namespace EA::RewardRules {
         completed_.clear();
     }
 
-    void ClearedLocationTracker::Snapshot(std::span<const std::uint32_t> everCleared)
+    void NewlyFlaggedTracker::Snapshot(std::span<const std::uint32_t> flagged)
     {
         known_.clear();
-        known_.insert(everCleared.begin(), everCleared.end());
+        known_.insert(flagged.begin(), flagged.end());
         ready_ = true;
     }
 
-    void ClearedLocationTracker::Invalidate() noexcept
+    void NewlyFlaggedTracker::Invalidate() noexcept
     {
         known_.clear();
         ready_ = false;
     }
 
-    std::vector<std::uint32_t> ClearedLocationTracker::Observe(
-        std::span<const std::uint32_t> everCleared)
+    std::vector<std::uint32_t> NewlyFlaggedTracker::Observe(
+        std::span<const std::uint32_t> flagged)
     {
         if (!ready_) {
-            Snapshot(everCleared);
+            Snapshot(flagged);
             return {};
         }
 
-        std::vector<std::uint32_t> newlyCleared;
-        for (const auto locationID : everCleared) {
-            if (locationID != 0 && known_.insert(locationID).second) {
-                newlyCleared.push_back(locationID);
+        std::vector<std::uint32_t> newlyFlagged;
+        for (const auto formID : flagged) {
+            if (formID != 0 && known_.insert(formID).second) {
+                newlyFlagged.push_back(formID);
             }
         }
-        return newlyCleared;
+        return newlyFlagged;
     }
 
     bool IsObjectiveCompletionTransition(
@@ -66,14 +66,6 @@ namespace EA::RewardRules {
             return state == 2u || state == 3u;
         };
         return !completed(oldState) && completed(newState);
-    }
-
-    bool ShouldRewardBook(
-        bool activationSucceeded,
-        bool playerActivated,
-        bool alreadyRead) noexcept
-    {
-        return activationSucceeded && playerActivated && !alreadyRead;
     }
 
     bool ShouldRewardPickpocket(std::int32_t numItems) noexcept

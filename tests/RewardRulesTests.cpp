@@ -32,11 +32,11 @@ namespace {
         Check(!lifecycle.Observe(0, QuestSignal::kCompleted), "zero quest id rejected");
     }
 
-    void TestClearedLocationTracker()
+    void TestNewlyFlaggedTracker()
     {
-        using EA::RewardRules::ClearedLocationTracker;
+        using EA::RewardRules::NewlyFlaggedTracker;
         using Ids = std::vector<std::uint32_t>;
-        ClearedLocationTracker tracker;
+        NewlyFlaggedTracker tracker;
         Check(!tracker.Ready(), "tracker starts without a snapshot");
         Check(tracker.Observe(Ids{ 0x10, 0x20 }).empty(), "observation without snapshot awards nothing");
         Check(tracker.Ready(), "first observation becomes the baseline");
@@ -61,11 +61,6 @@ namespace {
         Check(!IsObjectiveCompletionTransition(2, 3), "completed presentation change does not duplicate");
         Check(!IsObjectiveCompletionTransition(4, 5), "failed transition does not award");
         Check(IsObjectiveCompletionTransition(4, 2), "failed objective can later complete");
-
-        Check(ShouldRewardBook(true, true, false), "successful first player read awards");
-        Check(!ShouldRewardBook(false, true, false), "failed activation rejected");
-        Check(!ShouldRewardBook(true, false, false), "non-player activation rejected");
-        Check(!ShouldRewardBook(true, true, true), "reread rejected");
 
         Check(ShouldRewardPickpocket(1), "single item pickpocket awards");
         Check(ShouldRewardPickpocket(50), "stack still produces one eligible event");
@@ -118,7 +113,7 @@ namespace {
 int main()
 {
     TestQuestLifecycle();
-    TestClearedLocationTracker();
+    TestNewlyFlaggedTracker();
     TestTransitionsAndEligibility();
     TestKillRewards();
     TestMappings();

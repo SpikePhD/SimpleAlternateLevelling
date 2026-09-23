@@ -38,11 +38,6 @@ namespace EA::XPManager {
     // and overflow carry.
     void AwardXP(float amount, const AwardContext& context);
 
-    // Book deduplication guard.
-    // Returns true if this book has not yet been awarded XP this session.
-    // Returns false if already processed (skip).
-    bool RegisterBookRead(RE::FormID bookID);
-
     // Returns true only for the first completion in a quest lifecycle. Start
     // and reset signals re-arm repeatable quests without awarding XP.
     bool ObserveQuestStatus(RE::FormID questID, RewardRules::QuestSignal signal);

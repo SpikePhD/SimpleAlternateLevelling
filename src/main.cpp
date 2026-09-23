@@ -571,7 +571,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse) {
             InvalidateDeferredLifecycleWork();
             // New character — arm the CharCreateWatcher to fire on RaceMenu close.
             EA::EventSinks::ResetRewardState();
-            EA::EventSinks::SnapshotClearedLocations("new-game");
+            EA::EventSinks::SnapshotSavedFlags("new-game");
             s_awaitingCharCreate = true;
             s_skillsNormalized   = false;
             s_normalizeTaskQueued = false;
@@ -587,7 +587,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse) {
         // not involved in the new-game skill reset path. The loaded save's
         // location flags are final here, so take the location-clear baseline.
         if (msg->type == SKSE::MessagingInterface::kPostLoadGame) {
-            EA::EventSinks::SnapshotClearedLocations("post-load-game");
+            EA::EventSinks::SnapshotSavedFlags("post-load-game");
         }
     })) {
         logger::critical("[EA] Failed to register the SKSE messaging listener; plugin load aborted.");

@@ -1,8 +1,7 @@
 #include "PCH.h"
 #include "SkillHook.h"
 #include "Config.h"
-#include "RewardRules.h"
-#include "XPManager.h"
+#include "EventSinks.h"
 
 namespace EA::SkillHook {
     static bool s_installed = false;
@@ -49,55 +48,16 @@ namespace EA::SkillHook {
             RE::TESBoundObject* a_object,
             std::int32_t       a_targetCount)
         {
-            const bool alreadyRead = a_book && a_book->IsRead();
-            const bool skillBook = a_book && a_book->TeachesSkill();
             const bool playerActivated = a_activatorRef && a_activatorRef->IsPlayerRef();
-            const auto formID = a_book ? a_book->GetFormID() : RE::FormID{ 0 };
-            const std::string title = a_book && a_book->GetFullName() && a_book->GetFullName()[0]
-                ? a_book->GetFullName()
-                : "Book";
-
-            float xp = Config::xpBookNew;
-            if (skillBook) {
-                xp = Config::xpBookSkill;
-            } else if (a_book && Config::bookUseValueReward) {
-                xp = static_cast<float>(std::max(1, a_book->GetGoldValue())) * Config::bookValueMultiplier;
-            }
-            xp *= Config::bookReadingMultiplier;
-
             const bool activated = func(
                 a_book, a_targetRef, a_activatorRef, a_arg3, a_object, a_targetCount);
 
-            if (!RewardRules::ShouldRewardBook(activated, playerActivated, alreadyRead)) {
-                logger::debug("[EA] Book reward skipped: '{}' ({:08X}) success={} player={} alreadyRead={}.",
-                    title, formID, activated, playerActivated, alreadyRead);
-                return activated;
+            // Reading a spell tome from the world opens no Book Menu, so this
+            // hook triggers the shared read-flag check. Rewards and duplicate
+            // protection live in EventSinks::CheckNewlyReadBooks.
+            if (activated && playerActivated) {
+                EventSinks::QueueReadBookCheck("world-activate");
             }
-
-            auto* task = SKSE::GetTaskInterface();
-            if (!task) {
-                logger::error("[EA] Book reward: task interface unavailable for '{}' ({:08X}); reward skipped.",
-                    title, formID);
-                return activated;
-            }
-
-            const auto generation = XPManager::GetRewardGeneration();
-            task->AddTask([title, formID, skillBook, xp, generation]() {
-                if (XPManager::GetRewardGeneration() != generation) {
-                    logger::debug("[EA] Book reward: stale deferred task for '{}' ({:08X}) discarded after state reset.",
-                        title, formID);
-                    return;
-                }
-                if (!XPManager::RegisterBookRead(formID)) {
-                    logger::debug("[EA] Book reward: duplicate activation for '{}' ({:08X}) skipped.",
-                        title, formID);
-                    return;
-                }
-
-                XPManager::AwardXP(
-                    xp,
-                    XPManager::MakeBookContext(title, formID, skillBook, false));
-            });
             return activated;
         }
 

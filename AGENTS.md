@@ -20,7 +20,7 @@ SKSEPluginLoad()
 └── MessagingInterface kDataLoaded
     ├── SkillHook::Install()          - trampolines into PlayerCharacter::AddSkillExperience
     │                                   (discards all organic skill XP) and
-    │                                   TESObjectBOOK::Activate (book XP via deferred task)
+    │                                   TESObjectBOOK::Activate (triggers the book read-flag check)
     ├── EventSinks::Register()        - BSTEventSink registrations:
     │   ├── TESTrackedStatsEvent      - lock-success counter plus diagnostics only
     │   ├── ActorKill::Event          - player/player-commanded kill XP by type and level delta
@@ -44,12 +44,12 @@ SKSEPluginLoad()
 |---|---|
 | `src/main.cpp` | Plugin entry, log init, cosave callbacks, kDataLoaded orchestration, CharCreateWatcher |
 | `src/Config.cpp` / `include/Config.h` | JSON loader; all XP values as `inline` globals |
-| `src/XPManager.cpp` / `include/XPManager.h` | `AwardXP()` (native XP bucket feed), book/quest/location dedup guards, mod-owned pending points |
+| `src/XPManager.cpp` / `include/XPManager.h` | `AwardXP()` (native XP bucket feed, merged HUD notifications), quest/discovery guards, mod-owned pending points |
 | `src/Progression.cpp` / `include/Progression.h` | Pure curve validation/threshold calculation and versioned cosave codec |
 | `src/RewardRules.cpp` / `include/RewardRules.h` | Dependency-free reward eligibility, lifecycle, arithmetic, and marker/lock mappings |
 | `src/Leveling.cpp` / `include/Leveling.h` | Game-setting synchronization and finalized-level threshold refresh |
 | `src/UIRules.cpp` / `include/UIRules.h` | Dependency-free UI validation and transactional allocation session rules |
-| `src/SkillHook.cpp` / `include/SkillHook.h` | `write_branch<5>` hooks: AddSkillExperience (discard), TESObjectBOOK::Activate (book XP) |
+| `src/SkillHook.cpp` / `include/SkillHook.h` | `write_branch<5>` hooks: AddSkillExperience (discard), TESObjectBOOK::Activate (world-read trigger) |
 | `src/SkillMenu.cpp` / `include/SkillMenu.h` | Validated Scaleform boundary, menu lifecycle, preview/commit transaction, vanilla continuation |
 | `src/SettingsModel.cpp` / `include/SettingsModel.h` | Defaults-driven setting registry, bounds, layering, migration, presets, draft transaction, overrides |
 | `src/SettingsMenu.cpp` / `include/SettingsMenu.h` | Separate F10 native Scaleform menu, input sink, validated callbacks, atomic Apply/Cancel |
@@ -157,7 +157,15 @@ is collision-free. `IsRead()` is still false inside `Activate` before the origin
   not retroactively update it. Write directly in `OnDataLoaded` and `OnGameLoad`.
 - `RE::DebugNotification` must not be called from inside `TESObjectBOOK::Activate`'s call stack;
   defer via `SKSE::GetTaskInterface()->AddTask()`.
-- `"Books Read"` TrackedStat is unreliable in AE. Use `TESObjectBOOK::Activate` vtable hook.
+- `"Books Read"` TrackedStat is unreliable in AE. Book XP comes from diffing
+  `TESObjectBOOK::IsRead()` against a snapshot taken on `kPostLoadGame`/`kNewGame`. The check
+  runs a frame after Book/Inventory/Container Menu closes and after the `Activate` hook (world
+  spell tomes open no menu). Reading from the inventory or a container never calls `Activate`.
+  Spell tomes award book XP like other books.
+- XP notifications pass `cancelIfAlreadyQueued=false`; with `true` the HUD drops a message whose
+  text is already queued. Awards with the same notification key merge for 2 seconds.
+- The settings menu must enable `ControlMap::AllowTextInput` while a numeric field has focus
+  (`SAL_OnTextInput`) and always disable it again; otherwise typed characters never arrive.
 - `"Skill Books Read"` TrackedStat fires for skill books in AE; `"Books Read"` does not.
 - Misc quests never set `IsCompleted()`. Award objective XP from exact
   `ObjectiveState::Event` transitions; the tracked stat is diagnostic only.

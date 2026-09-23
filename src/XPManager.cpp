@@ -3,16 +3,104 @@
 #include "Config.h"
 #include "RewardRules.h"
 
+#include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <thread>
+#include <vector>
 
 namespace EA::XPManager {
 
     namespace {
         void ShowXPNotification(const char* a_message)
         {
+            // cancelIfAlreadyQueued=false: with true the HUD silently drops a
+            // message whose text is already queued, e.g. repeated kills.
             using NotificationFn = void (*)(const char*, const char*, bool);
             static REL::Relocation<NotificationFn> notify{ RELOCATION_ID(52050, 52933) };
-            notify(a_message, nullptr, true);
+            notify(a_message, nullptr, false);
+        }
+
+        // Awards with the same notification key within this window of the
+        // first one are merged into a single HUD message with their total.
+        constexpr auto kNotificationMergeWindow = std::chrono::seconds(2);
+
+        struct PendingNotification {
+            std::uint64_t id{ 0 };
+            std::string   key;
+            std::string   label;
+            float         total{ 0.0f };
+            int           count{ 0 };
+        };
+
+        // Two HUD notifications sent in the same frame were observed to lose
+        // one (a location clear beside the boss kill that caused it), so the
+        // mod's own messages are spaced at least this far apart.
+        constexpr auto kNotificationSpacing = std::chrono::milliseconds(1000);
+
+        std::vector<PendingNotification>      s_pendingNotifications;
+        std::uint64_t                         s_nextNotificationID{ 1 };
+        std::chrono::steady_clock::time_point s_nextNotificationSlot{};
+
+        void ScheduleFlush(std::uint64_t id, std::chrono::milliseconds delay);
+
+        // Whole numbers normally; one decimal below 1 so small value-based
+        // book rewards do not read as "+0 XP".
+        std::string FormatXP(float amount)
+        {
+            return amount < 1.0f ? std::format("{:.1f}", amount) : std::format("{:.0f}", amount);
+        }
+
+        void FlushNotification(std::uint64_t id)
+        {
+            const auto it = std::ranges::find(s_pendingNotifications, id, &PendingNotification::id);
+            if (it == s_pendingNotifications.end()) {
+                return;  // Discarded by a load, revert, or new game.
+            }
+            const auto now = std::chrono::steady_clock::now();
+            if (now < s_nextNotificationSlot) {
+                ScheduleFlush(id, std::chrono::duration_cast<std::chrono::milliseconds>(s_nextNotificationSlot - now));
+                return;
+            }
+            s_nextNotificationSlot = now + kNotificationSpacing;
+
+            const auto message = it->label.empty()
+                ? std::format("+{} XP", FormatXP(it->total))
+                : std::format("{} +{} XP", it->label, FormatXP(it->total));
+            logger::debug("[EA] Notification: '{}' ({} award(s) merged).", message, it->count);
+            ShowXPNotification(message.c_str());
+            s_pendingNotifications.erase(it);
+        }
+
+        // Sleeps off the main thread, then flushes on it; the pending list is
+        // only ever touched on the main thread.
+        void ScheduleFlush(std::uint64_t id, std::chrono::milliseconds delay)
+        {
+            if (!SKSE::GetTaskInterface()) {
+                FlushNotification(id);
+                return;
+            }
+            std::thread([id, delay]() {
+                std::this_thread::sleep_for(delay);
+                if (auto* tasks = SKSE::GetTaskInterface()) {
+                    tasks->AddTask([id]() { FlushNotification(id); });
+                }
+            }).detach();
+        }
+
+        void QueueNotification(std::string key, std::string label, float amount)
+        {
+            for (auto& pending : s_pendingNotifications) {
+                if (pending.key == key) {
+                    pending.total += amount;
+                    ++pending.count;
+                    return;
+                }
+            }
+
+            const auto id = s_nextNotificationID++;
+            s_pendingNotifications.push_back({ id, std::move(key), std::move(label), amount, 1 });
+            ScheduleFlush(id, std::chrono::duration_cast<std::chrono::milliseconds>(kNotificationMergeWindow));
         }
     }
 
@@ -20,7 +108,6 @@ namespace EA::XPManager {
     // State
     // -----------------------------------------------------------------------
     static int                            s_pendingSkillPoints = 0;
-    static std::unordered_set<RE::FormID> s_readBooks;
     static RewardRules::QuestLifecycle    s_questLifecycle;
     static std::unordered_set<std::uintptr_t> s_discoveredLocationMarkers;
     static std::uint64_t                       s_rewardGeneration = 1;
@@ -78,18 +165,6 @@ namespace EA::XPManager {
     void SetPendingSkillPoints(int n) { s_pendingSkillPoints = n; }
 
     // -----------------------------------------------------------------------
-    // Book guard
-    // -----------------------------------------------------------------------
-    bool RegisterBookRead(RE::FormID bookID) {
-        if (s_readBooks.contains(bookID)) {
-            logger::debug("[EA] Book guard: FormID {:08X} already awarded XP - skipped.", bookID);
-            return false;
-        }
-        s_readBooks.insert(bookID);
-        return true;
-    }
-
-    // -----------------------------------------------------------------------
     // Quest guard
     // -----------------------------------------------------------------------
     bool ObserveQuestStatus(RE::FormID questID, RewardRules::QuestSignal signal) {
@@ -110,9 +185,9 @@ namespace EA::XPManager {
     }
 
     void ResetRewardGuards() {
-        s_readBooks.clear();
         s_questLifecycle.Reset();
         s_discoveredLocationMarkers.clear();
+        s_pendingNotifications.clear();
         ++s_rewardGeneration;
         if (s_rewardGeneration == 0) {
             s_rewardGeneration = 1;
@@ -234,10 +309,8 @@ namespace EA::XPManager {
                 notifKey = std::string(context.sourceKey);
             }
             auto it = EA::Config::notificationMessages.find(notifKey);
-            std::string msg = (it != EA::Config::notificationMessages.end() && !it->second.empty())
-                ? std::format("{} +{:.0f} XP", it->second, amount)
-                : std::format("+{:.0f} XP", amount);
-            ShowXPNotification(msg.c_str());
+            std::string label = it != EA::Config::notificationMessages.end() ? it->second : std::string{};
+            QueueNotification(std::move(notifKey), std::move(label), amount);
         }
     }
 }

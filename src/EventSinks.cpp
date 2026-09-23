@@ -29,7 +29,8 @@ namespace EA::EventSinks {
 
     static std::optional<LockAttempt> s_lockAttempt;
     static std::optional<std::int32_t> s_lastLockCounter;
-    static RewardRules::ClearedLocationTracker s_clearedLocations;
+    static RewardRules::NewlyFlaggedTracker s_clearedLocations;
+    static RewardRules::NewlyFlaggedTracker s_readBooks;
 
     namespace {
         static std::string_view ClassifyMarkerType(RE::MARKER_TYPE type) {
@@ -180,6 +181,82 @@ namespace EA::EventSinks {
         return result;
     }
 
+    static std::vector<std::uint32_t> CollectReadBooks()
+    {
+        std::vector<std::uint32_t> result;
+        auto* dataHandler = RE::TESDataHandler::GetSingleton();
+        if (!dataHandler) {
+            logger::warn("[EA] Book reward: TESDataHandler is null.");
+            return result;
+        }
+        for (const auto* book : dataHandler->GetFormArray<RE::TESObjectBOOK>()) {
+            if (book && book->IsRead()) {
+                result.push_back(book->GetFormID());
+            }
+        }
+        return result;
+    }
+
+    // The engine clears a skill book's teaches-skill flag when it is read, and
+    // the read check runs afterwards, so remember skill books while unread.
+    static std::unordered_set<RE::FormID> s_unreadSkillBooks;
+
+    static void SnapshotUnreadSkillBooks()
+    {
+        s_unreadSkillBooks.clear();
+        auto* dataHandler = RE::TESDataHandler::GetSingleton();
+        if (!dataHandler) {
+            return;
+        }
+        for (const auto* book : dataHandler->GetFormArray<RE::TESObjectBOOK>()) {
+            if (book && !book->IsRead() && book->TeachesSkill()) {
+                s_unreadSkillBooks.insert(book->GetFormID());
+            }
+        }
+    }
+
+    static bool WasSkillBook(const RE::TESObjectBOOK& book)
+    {
+        return book.TeachesSkill() || s_unreadSkillBooks.contains(book.GetFormID());
+    }
+
+    static float CalculateBookReward(const RE::TESObjectBOOK& book)
+    {
+        float xp = Config::xpBookNew;
+        if (WasSkillBook(book)) {
+            xp = Config::xpBookSkill;
+        } else if (Config::bookUseValueReward) {
+            xp = static_cast<float>(std::max(1, book.GetGoldValue())) * Config::bookValueMultiplier;
+        }
+        return xp * Config::bookReadingMultiplier;
+    }
+
+    // Reading from the inventory or a container bypasses the Activate hook,
+    // so every read path funnels into this diff of the saved read flags.
+    // Spell tomes count as books.
+    static void CheckNewlyReadBooks(std::string_view trigger)
+    {
+        if (!s_readBooks.Ready()) {
+            logger::warn("[EA] Book reward: no load-time snapshot; recording state without reward (trigger={}).", trigger);
+        }
+        const auto newlyRead = s_readBooks.Observe(CollectReadBooks());
+        logger::debug("[EA] Book reward: check (trigger={}) found {} newly read book(s).", trigger, newlyRead.size());
+
+        for (const auto bookID : newlyRead) {
+            auto* book = RE::TESForm::LookupByID<RE::TESObjectBOOK>(bookID);
+            if (!book) {
+                continue;
+            }
+            auto* name = book->GetFullName();
+            const std::string title = name && name[0] ? name : "Book";
+            const bool skillBook = WasSkillBook(*book);
+            logger::info("[EA] Book reward: '{}' ({:08X}) newly read (trigger={}, skill={}, spell={}).",
+                title, bookID, trigger, skillBook, book->TeachesSpell());
+            XPManager::AwardXP(CalculateBookReward(*book),
+                XPManager::MakeBookContext(title, bookID, skillBook, false));
+        }
+    }
+
     struct OnLocationCleared : public RE::BSTEventSink<RE::LocationCleared::Event> {
         RE::BSEventNotifyControl ProcessEvent(
             const RE::LocationCleared::Event*,
@@ -245,7 +322,6 @@ namespace EA::EventSinks {
                 XPManager::AwardXP(reward,
                     XPManager::MakeStatContext(subject, "location_cleared", 1, typeKey));
             }
-            return RE::BSEventNotifyControl::kContinue;
         }
     };
 
@@ -370,6 +446,7 @@ namespace EA::EventSinks {
                 logger::trace("[EA] TrackedStat (unhandled): '{}' = {}",
                               event->stat.c_str(), event->value);
             }
+            return RE::BSEventNotifyControl::kContinue;
         }
     };
 
@@ -650,19 +727,60 @@ namespace EA::EventSinks {
     static OnLockpickingMenu s_lockpickingMenuSink;
     static OnLevelUpMenu s_levelUpMenuSink;
 
+    // Book, inventory, and container reads end with one of these menus
+    // closing; the read flag is set by then.
+    struct OnReadingMenuClose : public RE::BSTEventSink<RE::MenuOpenCloseEvent> {
+        RE::BSEventNotifyControl ProcessEvent(
+            const RE::MenuOpenCloseEvent*                  event,
+            RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
+        {
+            if (!event || event->opening) {
+                return RE::BSEventNotifyControl::kContinue;
+            }
+            if (event->menuName == RE::BookMenu::MENU_NAME ||
+                event->menuName == RE::InventoryMenu::MENU_NAME ||
+                event->menuName == RE::ContainerMenu::MENU_NAME) {
+                QueueReadBookCheck(event->menuName.c_str());
+            }
+            return RE::BSEventNotifyControl::kContinue;
+        }
+    };
+    static OnReadingMenuClose s_readingMenuSink;
+
     void ResetRewardState() {
         XPManager::ResetRewardGuards();
         s_lockAttempt.reset();
         s_lastLockCounter.reset();
         s_clearedLocations.Invalidate();
+        s_readBooks.Invalidate();
         logger::debug("[EA] Transient reward state reset.");
     }
 
-    void SnapshotClearedLocations(std::string_view reason) {
+    void SnapshotSavedFlags(std::string_view reason) {
         const auto everCleared = CollectEverClearedLocations();
         s_clearedLocations.Snapshot(everCleared);
-        logger::info("[EA] Location clear: snapshot of {} ever-cleared locations taken (reason={}).",
-            everCleared.size(), reason);
+        const auto readBooks = CollectReadBooks();
+        s_readBooks.Snapshot(readBooks);
+        SnapshotUnreadSkillBooks();
+        logger::info("[EA] Saved-flag snapshot (reason={}): {} ever-cleared locations, {} read books, {} unread skill books.",
+            reason, everCleared.size(), readBooks.size(), s_unreadSkillBooks.size());
+    }
+
+    void QueueReadBookCheck(std::string_view trigger) {
+        auto* tasks = SKSE::GetTaskInterface();
+        if (!tasks) {
+            logger::warn("[EA] Book reward: task interface unavailable; checking immediately (trigger={}).", trigger);
+            CheckNewlyReadBooks(trigger);
+            return;
+        }
+        const auto generation = XPManager::GetRewardGeneration();
+        tasks->AddTask([generation, trigger = std::string(trigger)]() {
+            if (XPManager::GetRewardGeneration() != generation) {
+                logger::debug("[EA] Book reward: stale deferred check discarded (trigger={}).", trigger);
+                return;
+            }
+            CheckNewlyReadBooks(trigger);
+        });
     }
 
     void Register() {
@@ -742,6 +860,8 @@ namespace EA::EventSinks {
             logger::info("[EA] EventSinks: [9/9] Lockpicking Menu event sink registered.");
             ui->AddEventSink(&s_levelUpMenuSink);
             logger::info("[EA] EventSinks: LevelUp Menu close sink registered for threshold refresh.");
+            ui->AddEventSink(&s_readingMenuSink);
+            logger::info("[EA] EventSinks: Book/Inventory/Container Menu close sink registered for book rewards.");
         } else {
             logger::error("[EA] EventSinks: UI singleton is null; lock context unavailable.");
         }
