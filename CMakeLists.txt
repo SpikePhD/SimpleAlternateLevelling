@@ -220,5 +220,6 @@ if(BUILD_TESTS)
         COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/validate_ui_assets.py"
             --native "${CMAKE_CURRENT_SOURCE_DIR}/src/SkillMenu.cpp"
             --actionscript "${CMAKE_CURRENT_SOURCE_DIR}/assets/swf_src/scripts/frame_1/DoAction.as"
-            --translation "${CMAKE_CURRENT_SOURCE_DIR}/data/Interface/Translations/SimpleAlternateLevelling_ENGLISH.txt")
+            --translation "${CMAKE_CURRENT_SOURCE_DIR}/data/Interface/Translations/SimpleAlternateLevelling_ENGLISH.txt"
+            --swf "${CMAKE_CURRENT_SOURCE_DIR}/data/Interface/EA_SkillMenu.swf")
 endif()
