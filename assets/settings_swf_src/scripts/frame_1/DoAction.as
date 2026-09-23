@@ -184,9 +184,14 @@ function salDraw() {
             var fieldFormat = salFormat(16, 0xFFFFFF, "center");
             valueField.setNewTextFormat(fieldFormat);
             valueField.setTextFormat(fieldFormat);
-            valueField.onSetFocus = function() { salEditing = this.settingRow.index; };
+            valueField.onSetFocus = function() {
+                salEditing = this.settingRow.index;
+                // Skyrim only forwards typed characters while text input is on.
+                gfx.io.GameDelegate.call("SAL_OnTextInput", [true]);
+            };
             valueField.onKillFocus = function() {
                 salEditing = -1;
+                gfx.io.GameDelegate.call("SAL_OnTextInput", [false]);
                 if (!salSendValue(this.settingRow, this.text)) this.text = String(this.settingRow.value);
             };
         }
@@ -206,7 +211,12 @@ function salDraw() {
     var cancel = salButton(salPanel, "cancel", depth++, 732, 610, 185, 34, salActions[2], false);
     cancel.onRelease = function() { gfx.io.GameDelegate.call("SAL_OnCancel", []); };
     var apply = salButton(salPanel, "apply", depth++, 925, 610, 197, 34, salActions[1], true);
-    apply.onRelease = function() { gfx.io.GameDelegate.call("SAL_OnApply", []); };
+    apply.onRelease = function() {
+        // Clicking a button does not blur the focused field, so commit a
+        // pending typed value before applying.
+        if (salEditing >= 0) Selection.setFocus(null);
+        gfx.io.GameDelegate.call("SAL_OnApply", []);
+    };
 }
 
 var salKeys = {};

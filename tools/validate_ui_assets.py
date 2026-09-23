@@ -92,7 +92,8 @@ def main() -> int:
     settings_native = args.settings_native.read_text(encoding="utf-8")
     settings_script = args.settings_actionscript.read_text(encoding="utf-8")
     for token in ("SAL_Init", "SAL_Update", "SAL_Error", "SAL_OnSet", "SAL_OnApply",
-                  "SAL_OnCancel", "SAL_OnResetSection", "SAL_OnResetAll", "SAL_OnPreset"):
+                  "SAL_OnCancel", "SAL_OnResetSection", "SAL_OnResetAll", "SAL_OnPreset",
+                  "SAL_OnTextInput"):
         require(settings_native, token, args.settings_native)
         require(settings_script, token, args.settings_actionscript)
     for token in ("args.GetMovie() != s_movie", "args.GetArgCount() != count",

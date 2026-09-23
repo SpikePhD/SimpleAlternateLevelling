@@ -19,6 +19,23 @@ namespace EA::SettingsMenu {
         std::atomic<bool> s_queued{ false };
         RE::GFxMovieView* s_movie = nullptr;
         bool s_registered = false;
+        bool s_textInputEnabled = false;
+
+        // Skyrim delivers typed characters to Scaleform only while text input
+        // is allowed. ControlMap keeps a counter, so every enable must be
+        // paired with exactly one disable, including when the menu closes.
+        void SetTextInput(bool enabled)
+        {
+            if (s_textInputEnabled == enabled) return;
+            auto* controlMap = RE::ControlMap::GetSingleton();
+            if (!controlMap) {
+                logger::warn("[EA] Settings: ControlMap unavailable; text input unchanged.");
+                return;
+            }
+            controlMap->AllowTextInput(enabled);
+            s_textInputEnabled = enabled;
+            logger::debug("[EA] Settings: text input {}.", enabled ? "enabled" : "disabled");
+        }
 
         std::string Translate(std::string_view key)
         {
@@ -152,6 +169,7 @@ namespace EA::SettingsMenu {
                 callbacks->Process("SAL_OnPreset", OnPreset);
                 callbacks->Process("SAL_OnApply", OnApply);
                 callbacks->Process("SAL_OnCancel", OnCancel);
+                callbacks->Process("SAL_OnTextInput", OnTextInput);
             }
         private:
             static void OnSet(const RE::FxDelegateArgs& args)
@@ -163,31 +181,38 @@ namespace EA::SettingsMenu {
                 if (rawIndex >= static_cast<double>(descriptors.size())) return;
                 const auto index = static_cast<std::size_t>(rawIndex);
                 const std::string value = args[1].GetString();
+                const auto& key = descriptors[index].key;
                 nlohmann::json candidate;
                 try {
                     switch (descriptors[index].kind) {
                         case SettingKind::Toggle:
-                            if (value != "true" && value != "false") return;
+                            if (value != "true" && value != "false") {
+                                logger::info("[EA] Settings: '{}' rejected unparsable value '{}'.", key, value);
+                                return;
+                            }
                             candidate = value == "true";
                             break;
                         case SettingKind::StartingMode: candidate = value; break;
-                        case SettingKind::Integer: {
-                            std::size_t used = 0;
-                            const auto parsed = std::stod(value, &used);
-                            if (used != value.size()) return;
-                            candidate = parsed;
-                            break;
-                        }
+                        case SettingKind::Integer:
                         case SettingKind::Number: {
                             std::size_t used = 0;
                             const auto parsed = std::stod(value, &used);
-                            if (used != value.size()) return;
+                            if (used != value.size()) {
+                                logger::info("[EA] Settings: '{}' rejected unparsable value '{}'.", key, value);
+                                return;
+                            }
                             candidate = parsed;
                             break;
                         }
                     }
-                } catch (...) { return; }
-                if (Config::Settings().Set(index, candidate) &&
+                } catch (...) {
+                    logger::info("[EA] Settings: '{}' rejected unparsable value '{}'.", key, value);
+                    return;
+                }
+                const bool accepted = Config::Settings().Set(index, candidate);
+                logger::info("[EA] Settings: draft '{}' = '{}' {}.", key, value,
+                    accepted ? "accepted" : "rejected (out of range)");
+                if (accepted &&
                     (descriptors[index].kind == SettingKind::Toggle ||
                      descriptors[index].kind == SettingKind::StartingMode)) Refresh();
             }
@@ -235,6 +260,11 @@ namespace EA::SettingsMenu {
                 Config::Settings().Cancel();
                 Close();
             }
+            static void OnTextInput(const RE::FxDelegateArgs& args)
+            {
+                if (!ValidCallback(args, 1) || !args[0].IsBool()) return;
+                SetTextInput(args[0].GetBool());
+            }
         };
 
         struct MenuWatcher final : RE::BSTEventSink<RE::MenuOpenCloseEvent> {
@@ -242,6 +272,7 @@ namespace EA::SettingsMenu {
                 RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
             {
                 if (event && event->menuName == kMenuName && !event->opening) {
+                    SetTextInput(false);
                     s_movie = nullptr;
                     s_queued = false;
                     Config::Settings().Cancel();
@@ -301,6 +332,7 @@ namespace EA::SettingsMenu {
 
     void ResetState()
     {
+        SetTextInput(false);
         s_queued = false;
         s_movie = nullptr;
         Config::Settings().Cancel();
