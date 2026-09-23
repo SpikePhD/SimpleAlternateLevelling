@@ -163,6 +163,8 @@ is collision-free. `IsRead()` is still false inside `Activate` before the origin
   references keep their FormID across cell respawns and `FF` IDs are recycled, so a
   session-long guard silently drops XP. Kills of the player's own commanded actors
   (summons, thralls, reanimated corpses) never award XP.
+- Call `SKSE::Init(a_skse, { .log = false })`. The default `InitInfo` creates CommonLib's
+  own logger and replaces the timestamped session logger from `InitializeLog()`.
 - `QUEST_DATA::Type::kCompanions` does not exist. Use `kCompanionsQuest`.
 - `TESActorValueChangeEvent` and `TESPerkEntryRunEvent` have no struct definitions in this
   CommonLibSSE-NG build; those sinks are commented out.

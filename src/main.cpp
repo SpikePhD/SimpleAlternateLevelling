@@ -549,7 +549,9 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse) {
         logger::critical("[EA] SKSE LoadInterface is null; plugin load aborted.");
         return false;
     }
-    SKSE::Init(a_skse);
+    // Keep the timestamped logger from InitializeLog(). CommonLib's default
+    // InitInfo creates its own logger and would replace the default logger.
+    SKSE::Init(a_skse, { .log = false });
 
     // Register messaging listener — hooks must wait for kDataLoaded
     auto* messaging = SKSE::GetMessagingInterface();
