@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
 
 namespace EA::LogPolicy {
     namespace {
@@ -20,6 +21,14 @@ namespace EA::LogPolicy {
             return kDefaultMaxLogFiles;
         }
         return static_cast<int>(*value);
+    }
+
+    std::optional<int> ParseMaxLogFiles(double value) noexcept {
+        if (!std::isfinite(value) || std::trunc(value) != value ||
+            value < 0.0 || value > static_cast<double>(kMaximumMaxLogFiles)) {
+            return std::nullopt;
+        }
+        return static_cast<int>(value);
     }
 
     bool IsSessionLogName(std::string_view name) noexcept {

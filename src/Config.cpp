@@ -139,14 +139,13 @@ namespace EA::Config {
         }
 
         const auto& value = j["debug"]["max_log_files"];
-        if (!value.is_number_integer()) {
+        if (!value.is_number()) {
             return { LogPolicy::kDefaultMaxLogFiles, true };
         }
 
         try {
-            const auto raw = value.get<std::int64_t>();
-            const auto validated = LogPolicy::ValidateMaxLogFiles(raw);
-            return { validated, raw < 0 || raw > LogPolicy::kMaximumMaxLogFiles };
+            const auto parsed = LogPolicy::ParseMaxLogFiles(value.get<double>());
+            return { parsed.value_or(LogPolicy::kDefaultMaxLogFiles), !parsed };
         } catch (const json::exception&) {
             return { LogPolicy::kDefaultMaxLogFiles, true };
         }

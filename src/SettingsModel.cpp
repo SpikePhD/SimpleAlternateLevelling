@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cctype>
+#include <cstdint>
 #include <functional>
 
 namespace EA {
@@ -38,6 +39,17 @@ namespace EA {
                 node = &(*node)[key];
                 start = end + 1;
             }
+        }
+
+        // The menu sends every number as a double. Store integer settings as
+        // JSON integers so the user file keeps their type (20, not 20.0).
+        // Callers validate first, so the value is integral and in range.
+        Json Normalized(const SettingDescriptor& descriptor, const Json& value)
+        {
+            if (descriptor.kind == SettingKind::Integer && value.is_number_float()) {
+                return Json(static_cast<std::int64_t>(value.get<double>()));
+            }
+            return value;
         }
 
         SettingSection Section(std::string_view key)
@@ -183,7 +195,7 @@ namespace EA {
             } else {
                 for (const auto& descriptor : registry_) {
                     if (const auto* candidate = Find(user, descriptor.key)) {
-                        if (Valid(descriptor, *candidate)) Put(effective_, descriptor.key, *candidate);
+                        if (Valid(descriptor, *candidate)) Put(effective_, descriptor.key, Normalized(descriptor, *candidate));
                         else if (warning) *warning = "invalid override ignored: " + descriptor.key;
                     }
                 }
@@ -207,7 +219,7 @@ namespace EA {
     bool SettingsModel::Set(std::size_t index, const Json& value)
     {
         if (index >= registry_.size() || !Valid(registry_[index], value)) return false;
-        Put(draft_, registry_[index].key, value);
+        Put(draft_, registry_[index].key, Normalized(registry_[index], value));
         return true;
     }
 

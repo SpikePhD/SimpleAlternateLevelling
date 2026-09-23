@@ -114,5 +114,20 @@ int main(int argc, char** argv)
     SettingsModel malformed;
     assert(malformed.Load(defaults, {{"config_version", "bad"}, {"leveling", {{"xp_base", 999.0}}}}, &warning));
     assert(malformed.Effective()["leveling"]["xp_base"] == defaults["leveling"]["xp_base"]);
+
+    // The menu sends integers as doubles; they must persist as JSON integers.
+    SettingsModel integers;
+    assert(integers.Load(defaults, Json::object()));
+    integers.Begin();
+    assert(integers.Set(Index(integers, "debug.max_log_files"), 20.0));
+    assert(!integers.Set(Index(integers, "debug.max_log_files"), 20.5));
+    assert(integers.Draft()["debug"]["max_log_files"].is_number_integer());
+    const Json integerOverrides = integers.Overrides();
+    assert(integerOverrides["debug"]["max_log_files"].is_number_integer());
+    assert(integerOverrides.dump().find("20.0") == std::string::npos);
+    SettingsModel legacyFloat;
+    assert(legacyFloat.Load(defaults, {{"debug", {{"max_log_files", 20.0}}}}));
+    assert(legacyFloat.Effective()["debug"]["max_log_files"].is_number_integer());
+    assert(legacyFloat.Effective()["debug"]["max_log_files"] == 20);
     std::cout << "settings model tests passed\n";
 }

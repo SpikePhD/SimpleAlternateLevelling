@@ -1,5 +1,6 @@
 #include "LogPolicy.h"
 
+#include <cmath>
 #include <cstdint>
 #include <iostream>
 #include <optional>
@@ -23,6 +24,16 @@ namespace {
         Check(ValidateMaxLogFiles(1000) == 1000, "upper boundary is accepted");
         Check(ValidateMaxLogFiles(-1) == 10, "negative retention is rejected");
         Check(ValidateMaxLogFiles(1001) == 10, "excessive retention is rejected");
+
+        using EA::LogPolicy::ParseMaxLogFiles;
+        Check(ParseMaxLogFiles(20.0) == 20, "menu-written integral double accepted");
+        Check(ParseMaxLogFiles(0.0) == 0, "zero retention accepted");
+        Check(ParseMaxLogFiles(1000.0) == 1000, "upper boundary accepted");
+        Check(!ParseMaxLogFiles(2.5), "fractional retention rejected");
+        Check(!ParseMaxLogFiles(-1.0), "negative retention rejected");
+        Check(!ParseMaxLogFiles(1001.0), "excessive retention rejected");
+        Check(!ParseMaxLogFiles(1e300), "huge value rejected without overflow");
+        Check(!ParseMaxLogFiles(std::nan("")), "NaN rejected");
     }
 
     void TestSelection() {

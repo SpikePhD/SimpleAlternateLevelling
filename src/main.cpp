@@ -54,11 +54,10 @@ namespace {
                 const auto& debug = source["debug"];
                 if (debug.contains("verbose") && debug["verbose"].is_boolean())
                     config.verbose = debug["verbose"].get<bool>();
-                if (debug.contains("max_log_files") && debug["max_log_files"].is_number_integer()) {
+                if (debug.contains("max_log_files") && debug["max_log_files"].is_number()) {
                     try {
-                        const auto raw = debug["max_log_files"].get<std::int64_t>();
-                        if (raw >= 0 && raw <= EA::LogPolicy::kMaximumMaxLogFiles)
-                            config.maxLogFiles = EA::LogPolicy::ValidateMaxLogFiles(raw);
+                        if (const auto parsed = EA::LogPolicy::ParseMaxLogFiles(debug["max_log_files"].get<double>()))
+                            config.maxLogFiles = *parsed;
                     } catch (const nlohmann::json::exception&) {}
                 }
             };
