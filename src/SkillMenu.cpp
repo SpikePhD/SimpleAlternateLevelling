@@ -66,9 +66,17 @@ namespace EA::SkillMenu {
         bool                        s_movieLoaded{ false };
         int                         s_pendingCarryOver{ 0 };
 
-        std::string s_pointsLabel{ "Skill points to distribute:" };
+        std::string s_pointsLabel{ "Distribute Skill Points" };
         std::string s_confirmLabel{ "Confirm" };
         std::string s_resetLabel{ "Reset" };
+        std::string s_levelLabel{ "Level" };
+        std::string s_remainingLabel{ "points remaining" };
+        std::string s_carriedLabel{ "carried over from earlier levels" };
+        std::string s_maxLabel{ "Max" };
+        std::string s_combatLabel{ "Combat" };
+        std::string s_magicLabel{ "Magic" };
+        std::string s_stealthLabel{ "Stealth" };
+        std::string s_hintLabel{ "Arrows: select    Enter or +: add    Backspace or -: remove    R: reset    C or Esc: confirm" };
 
         [[nodiscard]] bool ReadCurrentSkillValues(
             std::array<float, UIRules::kSkillCount>& values,
@@ -177,25 +185,28 @@ namespace EA::SkillMenu {
                 skillArray.PushBack(object);
             }
 
-            std::array<RE::GFxValue, 18> args;
+            // Presentation strings and context for the redesigned layout.
+            RE::GFxValue info;
+            movie->CreateObject(&info);
+            auto* player = RE::PlayerCharacter::GetSingleton();
+            info.SetMember("level", RE::GFxValue(player ? static_cast<int>(player->GetLevel()) : 0));
+            info.SetMember("levelLabel", RE::GFxValue(s_levelLabel.c_str()));
+            info.SetMember("remainingLabel", RE::GFxValue(s_remainingLabel.c_str()));
+            info.SetMember("carriedLabel", RE::GFxValue(s_carriedLabel.c_str()));
+            info.SetMember("maxLabel", RE::GFxValue(s_maxLabel.c_str()));
+            info.SetMember("combatLabel", RE::GFxValue(s_combatLabel.c_str()));
+            info.SetMember("magicLabel", RE::GFxValue(s_magicLabel.c_str()));
+            info.SetMember("stealthLabel", RE::GFxValue(s_stealthLabel.c_str()));
+            info.SetMember("hint", RE::GFxValue(s_hintLabel.c_str()));
+
+            std::array<RE::GFxValue, 7> args;
             args[0] = skillArray;
             args[1] = s_session.TotalPoints();
             args[2] = s_pendingCarryOver;
-            args[3] = Config::menuPanelWidth;
-            args[4] = Config::menuPanelHeight;
-            args[5] = Config::menuPanelYOffset;
-            args[6] = Config::menuSkillRowGap;
-            args[7] = Config::menuSkillColumnGap;
-            args[8] = Config::menuSkillLabelValueGap;
-            args[9] = Config::menuSkillValueArrowGap;
-            args[10] = Config::menuSkillButtonTopGap;
-            args[11] = Config::menuSkillButtonRowOffset;
-            args[12] = Config::menuSkillButtonGap;
-            args[13] = Config::menuFontSize;
-            args[14] = Config::menuHeaderFontSize;
-            args[15] = s_pointsLabel;
-            args[16] = s_confirmLabel;
-            args[17] = s_resetLabel;
+            args[3] = s_pointsLabel;
+            args[4] = s_confirmLabel;
+            args[5] = s_resetLabel;
+            args[6] = info;
 
             if (!movie->Invoke("EA_Init", nullptr, args.data(), static_cast<std::uint32_t>(args.size()))) {
                 logger::error("[EA] SkillMenu: required EA_Init function is missing from the SWF.");
@@ -212,9 +223,10 @@ namespace EA::SkillMenu {
             if (!movie || index >= kSkills.size()) {
                 return;
             }
-            std::array<RE::GFxValue, 2> args{
+            std::array<RE::GFxValue, 3> args{
                 RE::GFxValue(static_cast<int>(kSkills[index].actorValue)),
-                RE::GFxValue(s_session.Preview(index))
+                RE::GFxValue(s_session.Preview(index)),
+                RE::GFxValue(static_cast<double>(s_session.Delta(index)))
             };
             if (!movie->Invoke("EA_UpdateSkill", nullptr, args.data(), static_cast<std::uint32_t>(args.size()))) {
                 logger::warn("[EA] SkillMenu: EA_UpdateSkill is missing from the active SWF.");
@@ -257,6 +269,14 @@ namespace EA::SkillMenu {
             s_pointsLabel = translate("$SAL_SKILL_POINTS_LABEL", "Skill points to distribute:");
             s_confirmLabel = translate("$SAL_CONFIRM", "Confirm");
             s_resetLabel = translate("$SAL_RESET", "Reset");
+            s_levelLabel = translate("$SAL_ALLOC_LEVEL", "Level");
+            s_remainingLabel = translate("$SAL_ALLOC_REMAINING", "points remaining");
+            s_carriedLabel = translate("$SAL_ALLOC_CARRIED", "carried over from earlier levels");
+            s_maxLabel = translate("$SAL_ALLOC_MAX", "Max");
+            s_combatLabel = translate("$SAL_GROUP_COMBAT", "Combat");
+            s_magicLabel = translate("$SAL_GROUP_MAGIC", "Magic");
+            s_stealthLabel = translate("$SAL_GROUP_STEALTH", "Stealth");
+            s_hintLabel = translate("$SAL_ALLOC_HINT", s_hintLabel);
         }
 
         class EASkillMenu final : public RE::IMenu {
@@ -293,6 +313,7 @@ namespace EA::SkillMenu {
                     return;
                 }
                 callbacks->Process("EA_OnAllocate", OnAllocate);
+                callbacks->Process("EA_OnDeallocate", OnDeallocate);
                 callbacks->Process("EA_OnConfirm", OnConfirm);
                 callbacks->Process("EA_OnReset", OnReset);
             }
@@ -312,6 +333,22 @@ namespace EA::SkillMenu {
                     return;
                 }
                 AllocatePoint(kSkills[*index].actorValue);
+            }
+
+            static void OnDeallocate(const RE::FxDelegateArgs& args)
+            {
+                if (!IsValidCallback(args, 1) || !args[0].IsNumber()) {
+                    return;
+                }
+                const auto identifier = UIRules::ParseIntegralIdentifier(args[0].GetNumber());
+                const auto index = identifier
+                    ? UIRules::FindWhitelistedIdentifier(*identifier, kActorValueWhitelist)
+                    : std::nullopt;
+                if (!index) {
+                    logger::warn("[EA] SkillMenu: rejected non-skill deallocation identifier.");
+                    return;
+                }
+                DeallocatePoint(kSkills[*index].actorValue);
             }
 
             static void OnConfirm(const RE::FxDelegateArgs& args)
@@ -481,6 +518,27 @@ namespace EA::SkillMenu {
         InvokeUpdateSkill(*index);
         InvokeUpdatePoints();
         logger::info("[EA] SkillMenu: previewed AV={} at {:.1f}; {} points remain.",
+            static_cast<int>(skill), s_session.Preview(*index), s_session.RemainingPoints());
+    }
+
+    void DeallocatePoint(RE::ActorValue skill)
+    {
+        const auto index = UIRules::FindWhitelistedIdentifier(
+            static_cast<int>(skill), kActorValueWhitelist);
+        if (!index) {
+            logger::warn("[EA] SkillMenu: native deallocation request rejected for non-skill AV={}.",
+                static_cast<int>(skill));
+            return;
+        }
+        const auto result = s_session.Deallocate(*index);
+        if (result != UIRules::AllocationResult::kAllocated) {
+            logger::debug("[EA] SkillMenu: deallocation rejected for AV={} (reason={}).",
+                static_cast<int>(skill), static_cast<int>(result));
+            return;
+        }
+        InvokeUpdateSkill(*index);
+        InvokeUpdatePoints();
+        logger::info("[EA] SkillMenu: removed a point from AV={}, now {:.1f}; {} points remain.",
             static_cast<int>(skill), s_session.Preview(*index), s_session.RemainingPoints());
     }
 

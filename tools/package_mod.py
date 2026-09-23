@@ -19,7 +19,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dll", required=True, type=Path)
     parser.add_argument("--config", required=True, type=Path)
     parser.add_argument("--swf", required=True, type=Path)
-    parser.add_argument("--settings-swf", required=True, type=Path)
     parser.add_argument("--translation", required=True, type=Path)
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--version", required=True)
@@ -52,7 +51,6 @@ def main() -> int:
     output = args.output_dir / archive_name
     entries = {
         "Interface/EA_SkillMenu.swf": args.swf,
-        "Interface/SAL_SettingsMenu.swf": args.settings_swf,
         "Interface/Translations/SimpleAlternateLevelling_ENGLISH.txt": args.translation,
         "SKSE/Plugins/SimpleAlternateLevelling.dll": args.dll,
         "SKSE/Plugins/SimpleAlternateLevelling.json": args.config,

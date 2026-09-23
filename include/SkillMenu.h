@@ -6,6 +6,7 @@ namespace EA::SkillMenu {
     [[nodiscard]] bool Register();
     void Open();
     void AllocatePoint(RE::ActorValue skill);
+    void DeallocatePoint(RE::ActorValue skill);
     void Confirm();
     void ResetAllocations();
     void ResetState();

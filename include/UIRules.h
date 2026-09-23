@@ -29,7 +29,6 @@ namespace EA::UIRules {
 
     [[nodiscard]] IntegerValidation ValidateInteger(
         double candidate, int defaultValue, int minimum, int maximum);
-    [[nodiscard]] IntegerValidation ValidatePanelHeight(double candidate, int defaultValue);
     [[nodiscard]] FloatValidation ValidateFloat(
         double candidate, float defaultValue, float minimum, float maximum);
     [[nodiscard]] std::optional<int> CheckedPointTotal(int pendingPoints, int grant);
@@ -43,7 +42,8 @@ namespace EA::UIRules {
         kInvalidSkill,
         kNoPoints,
         kAtCap,
-        kInvalidValue
+        kInvalidValue,
+        kNothingToRemove
     };
 
     enum class CommitStatus {
@@ -69,6 +69,9 @@ namespace EA::UIRules {
             float cap,
             const std::array<float, kSkillCount>& snapshot);
         [[nodiscard]] AllocationResult Allocate(std::size_t skillIndex);
+        // Returns one point allocated in this session. Never lowers a skill
+        // below its snapshot value.
+        [[nodiscard]] AllocationResult Deallocate(std::size_t skillIndex);
         [[nodiscard]] bool Reset();
         [[nodiscard]] CommitPlan PrepareCommit(
             const std::array<float, kSkillCount>& currentValues);

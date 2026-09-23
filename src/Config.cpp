@@ -218,8 +218,6 @@ namespace EA::Config {
 
         // Quest XP
         xpQuestMain     = ReadFloat(j, {"xp_sources", "quest", "main"},      xpQuestMain);
-        xpQuestFaction  = ReadFloat(j, {"xp_sources", "quest", "faction"},   xpQuestFaction);
-        xpQuestDLC      = ReadFloat(j, {"xp_sources", "quest", "dlc"},       xpQuestDLC);
         xpQuestCollege  = ReadFloat(j, {"xp_sources", "quest", "college"},   xpQuestCollege);
         xpQuestThieves  = ReadFloat(j, {"xp_sources", "quest", "thieves"},   xpQuestThieves);
         xpQuestBrotherhood = ReadFloat(j, {"xp_sources", "quest", "brotherhood"}, xpQuestBrotherhood);
@@ -254,48 +252,26 @@ namespace EA::Config {
         bookValueMultiplier = ReadFloat(j, {"xp_sources", "book", "value_multiplier"}, bookValueMultiplier);
         bookReadingMultiplier = ReadFloat(j, {"xp_sources", "book", "reading_multiplier"}, bookReadingMultiplier);
 
-        // Location XP
-        xpLocationDiscovered = ReadFloat(j, {"xp_sources", "location", "discovered"}, xpLocationDiscovered);
-        xpLocationCleared    = ReadFloat(j, {"xp_sources", "location", "cleared"},    xpLocationCleared);
-
-        locationDiscoveryRewards.clear();
-        locationClearingRewards.clear();
-        const std::pair<std::string_view, float> discoveryDefaults[] = {
-            {"city", xpLocationDiscovered}, {"town", xpLocationDiscovered}, {"settlement", xpLocationDiscovered},
-            {"cave", xpLocationDiscovered}, {"camp", xpLocationDiscovered}, {"fort", xpLocationDiscovered},
-            {"nordic_ruin", xpLocationDiscovered}, {"dwemer_ruin", xpLocationDiscovered}, {"shipwreck", xpLocationDiscovered},
-            {"grove", xpLocationDiscovered}, {"landmark", xpLocationDiscovered}, {"dragon_lair", xpLocationDiscovered},
-            {"farm", xpLocationDiscovered}, {"wood_mill", xpLocationDiscovered}, {"mine", xpLocationDiscovered},
-            {"military_camp", xpLocationDiscovered}, {"doomstone", xpLocationDiscovered}, {"wheat_mill", xpLocationDiscovered},
-            {"smelter", xpLocationDiscovered}, {"stable", xpLocationDiscovered}, {"imperial_tower", xpLocationDiscovered},
-            {"clearing", xpLocationDiscovered}, {"pass", xpLocationDiscovered}, {"altar", xpLocationDiscovered},
-            {"rock", xpLocationDiscovered}, {"lighthouse", xpLocationDiscovered}, {"orc_stronghold", xpLocationDiscovered},
-            {"giant_camp", xpLocationDiscovered}, {"shack", xpLocationDiscovered}, {"nordic_tower", xpLocationDiscovered},
-            {"nordic_dwelling", xpLocationDiscovered}, {"docks", xpLocationDiscovered}, {"daedric_shrine", xpLocationDiscovered},
-            {"castle", xpLocationDiscovered}, {"default", xpLocationDiscovered}
+        // Location XP. Every type defaults to its list's "default" entry.
+        static constexpr std::string_view kLocationTypes[] = {
+            "city", "town", "settlement", "cave", "camp", "fort", "nordic_ruin", "dwemer_ruin",
+            "shipwreck", "grove", "landmark", "dragon_lair", "farm", "wood_mill", "mine",
+            "military_camp", "doomstone", "wheat_mill", "smelter", "stable", "imperial_tower",
+            "clearing", "pass", "altar", "rock", "lighthouse", "orc_stronghold", "giant_camp",
+            "shack", "nordic_tower", "nordic_dwelling", "docks", "daedric_shrine", "castle"
         };
-        const std::pair<std::string_view, float> clearingDefaults[] = {
-            {"city", xpLocationCleared}, {"town", xpLocationCleared}, {"settlement", xpLocationCleared},
-            {"cave", xpLocationCleared}, {"camp", xpLocationCleared}, {"fort", xpLocationCleared},
-            {"nordic_ruin", xpLocationCleared}, {"dwemer_ruin", xpLocationCleared}, {"shipwreck", xpLocationCleared},
-            {"grove", xpLocationCleared}, {"landmark", xpLocationCleared}, {"dragon_lair", xpLocationCleared},
-            {"farm", xpLocationCleared}, {"wood_mill", xpLocationCleared}, {"mine", xpLocationCleared},
-            {"military_camp", xpLocationCleared}, {"doomstone", xpLocationCleared}, {"wheat_mill", xpLocationCleared},
-            {"smelter", xpLocationCleared}, {"stable", xpLocationCleared}, {"imperial_tower", xpLocationCleared},
-            {"clearing", xpLocationCleared}, {"pass", xpLocationCleared}, {"altar", xpLocationCleared},
-            {"rock", xpLocationCleared}, {"lighthouse", xpLocationCleared}, {"orc_stronghold", xpLocationCleared},
-            {"giant_camp", xpLocationCleared}, {"shack", xpLocationCleared}, {"nordic_tower", xpLocationCleared},
-            {"nordic_dwelling", xpLocationCleared}, {"docks", xpLocationCleared}, {"daedric_shrine", xpLocationCleared},
-            {"castle", xpLocationCleared}, {"default", xpLocationCleared}
+        const auto readRewards = [&](std::string_view list, float builtInDefault,
+                                     std::unordered_map<std::string, float>& rewards) {
+            rewards.clear();
+            const auto fallback = ReadFloat(j, {"xp_sources", "location", std::string(list), "default"}, builtInDefault);
+            rewards.emplace("default", fallback);
+            for (const auto type : kLocationTypes) {
+                rewards.emplace(std::string(type),
+                    ReadFloat(j, {"xp_sources", "location", std::string(list), std::string(type)}, fallback));
+            }
         };
-        for (const auto& [key, def] : discoveryDefaults) {
-            locationDiscoveryRewards.emplace(std::string(key),
-                ReadFloat(j, {"xp_sources", "location", "discovery", std::string(key)}, def));
-        }
-        for (const auto& [key, def] : clearingDefaults) {
-            locationClearingRewards.emplace(std::string(key),
-                ReadFloat(j, {"xp_sources", "location", "clearing", std::string(key)}, def));
-        }
+        readRewards("discovery", kDefaultLocationDiscoveredXP, locationDiscoveryRewards);
+        readRewards("clearing", kDefaultLocationClearedXP, locationClearingRewards);
 
         // Lockpick XP
         xpLockNovice     = ReadFloat(j, {"xp_sources", "lockpick", "novice"},     xpLockNovice);
@@ -340,8 +316,8 @@ namespace EA::Config {
         xpIncrease = validatedCurve.curve.increase;
         xpCap      = validatedCurve.curve.cap;
 
-        // Skill allocation and UI layout. Each present invalid value is
-        // rejected independently so one typo cannot poison the entire menu.
+        // Skill allocation. Each present invalid value is rejected
+        // independently so one typo cannot poison the others.
         const auto readInteger = [&](std::string_view key, int defaultValue, int minimum, int maximum) {
             const auto raw = ReadNumber(j, { "skill_allocation", std::string(key) }, defaultValue);
             const auto validated = raw.invalid
@@ -352,9 +328,6 @@ namespace EA::Config {
                     key, minimum, maximum, defaultValue);
             }
             return validated.value;
-        };
-        const auto readGap = [&](std::string_view key, int defaultValue, int minimum = 0, int maximum = 120) {
-            return readInteger(key, defaultValue, minimum, maximum);
         };
 
         skillPointsPerLevel = readInteger("points_per_level", kDefaultSkillPointsPerLevel, 0, 1000);
@@ -367,27 +340,6 @@ namespace EA::Config {
             logger::warn("[EA] Config: skill_allocation.skill_cap must be finite and from 1 through 1000; using default {:.1f}.",
                 kDefaultSkillCap);
         }
-
-        menuPanelWidth = readInteger("panel_width", kDefaultMenuPanelWidth, 480, 1280);
-        const auto rawHeight = ReadNumber(j, { "skill_allocation", "panel_height" }, kDefaultMenuPanelHeight);
-        const auto validatedHeight = rawHeight.invalid
-            ? UIRules::IntegerValidation{ kDefaultMenuPanelHeight, true }
-            : UIRules::ValidatePanelHeight(rawHeight.value, kDefaultMenuPanelHeight);
-        menuPanelHeight = validatedHeight.value;
-        if (rawHeight.present && validatedHeight.replaced) {
-            logger::warn("[EA] Config: skill_allocation.panel_height must be 0 or an integer from 300 through 720; using default {}.",
-                kDefaultMenuPanelHeight);
-        }
-        menuPanelYOffset = readInteger("panel_y_offset", kDefaultMenuPanelYOffset, -360, 360);
-        menuSkillRowGap = readInteger("row_gap", kDefaultMenuSkillRowGap, 24, 72);
-        menuSkillColumnGap = readInteger("column_gap", kDefaultMenuSkillColumnGap, 0, 200);
-        menuSkillLabelValueGap = readGap("label_value_gap", kDefaultMenuSkillLabelValueGap);
-        menuSkillValueArrowGap = readGap("value_arrow_gap", kDefaultMenuSkillValueArrowGap);
-        menuSkillButtonTopGap = readGap("button_top_gap", kDefaultMenuSkillButtonTopGap);
-        menuSkillButtonRowOffset = readInteger("button_row_offset", kDefaultMenuSkillButtonRowOffset, -72, 120);
-        menuSkillButtonGap = readGap("button_gap", kDefaultMenuSkillButtonGap);
-        menuFontSize = readInteger("font_size", kDefaultMenuFontSize, 8, 40);
-        menuHeaderFontSize = readInteger("header_font_size", kDefaultMenuHeaderFontSize, 10, 48);
 
         // Starting skills are only consulted for the next new character.
         const auto mode = ReadString(j, { "starting_skills", "mode" }, "vanilla");
@@ -402,9 +354,6 @@ namespace EA::Config {
                 startingSkillsCustom[it.key()] = ReadFloat(j, { "starting_skills", "custom", it.key() }, 0.0f);
             }
         }
-        const auto rawHotkey = ReadNumber(j, { "interface", "settings_hotkey" }, 0x44);
-        settingsHotkey = rawHotkey.invalid || !EA::SettingsModel::ValidHotkey(rawHotkey.value)
-            ? 0x44 : static_cast<int>(rawHotkey.value);
 
         // Notifications
         notificationsEnabled = ReadBool(j, {"notifications", "enabled"}, notificationsEnabled);
@@ -425,12 +374,10 @@ namespace EA::Config {
         loadMsg("quest_companions",    "Strength is earned");
         loadMsg("quest_side",          "Another soul aided");
         loadMsg("quest_misc",          "Task complete");
-        loadMsg("quest_faction",       "Honour to your faction");
         loadMsg("quest_daedric",       "Daedric favour earned");
         loadMsg("quest_civil_war",     "For Skyrim");
         loadMsg("quest_dawnguard",     "The night shifts");
         loadMsg("quest_dragonborn",    "A new chapter");
-        loadMsg("quest_dlc",           "A new chapter");
         loadMsg("quest_objectives",    "Objective complete");
         loadMsg("quest_other",         "Quest complete");
         loadMsg("location_discovered", "A new place discovered");
@@ -447,28 +394,25 @@ namespace EA::Config {
         // Log what was loaded (always visible, not gated by verbose)
         logger::info("[EA] Config loaded from: {}", configPath.string());
         logger::info("[EA] Config: verbose={}", verbose);
-        logger::info("[EA] Config: Quest XP — main={:.1f}, side={:.1f}, misc={:.1f}, faction={:.1f}, daedric={:.1f}, civil_war={:.1f}, dlc={:.1f}, other={:.1f}",
-            xpQuestMain, xpQuestSide, xpQuestMisc, xpQuestFaction,
-            xpQuestDaedric, xpQuestCivilWar, xpQuestDLC, xpQuestOther);
+        logger::info("[EA] Config: Quest XP — main={:.1f}, side={:.1f}, misc={:.1f}, daedric={:.1f}, civil_war={:.1f}, other={:.1f}",
+            xpQuestMain, xpQuestSide, xpQuestMisc, xpQuestDaedric, xpQuestCivilWar, xpQuestOther);
         logger::info("[EA] Config: Kill XP — dragon={:.1f}, daedra={:.1f}, undead={:.1f}, animal={:.1f}, creature={:.1f}, humanoid={:.1f}, default={:.1f}, scale={:.2f}",
             xpKillDragon, xpKillDaedra, xpKillUndead, xpKillAnimal,
             xpKillCreature, xpKillHumanoid, xpKillDefault, xpKillLevelScaleFactor);
         logger::info("[EA] Config: Pickpocket XP — base={:.1f}", xpPickpocketBase);
         logger::info("[EA] Config: Book XP — new={:.1f}, skill={:.1f}, reading_mult={:.2f}, value_mode={}",
             xpBookNew, xpBookSkill, bookReadingMultiplier, bookUseValueReward);
-        logger::info("[EA] Config: Location XP — discovered={:.1f}, cleared={:.1f}", xpLocationDiscovered, xpLocationCleared);
+        logger::info("[EA] Config: Location XP — default discovered={:.1f}, default cleared={:.1f}",
+            locationDiscoveryRewards["default"], locationClearingRewards["default"]);
         logger::info("[EA] Config: Lock XP — novice={:.1f}, apprentice={:.1f}, adept={:.1f}, expert={:.1f}, master={:.1f}",
             xpLockNovice, xpLockApprentice, xpLockAdept, xpLockExpert, xpLockMaster);
         logger::info("[EA] Config: Leveling — xp_base={:.1f}, xp_increase={:.1f}, xp_cap={:.1f}",
             xpBase, xpIncrease, xpCap);
-        logger::info("[EA] Config: Skill allocation — points_per_level={}, panel={}x{}, y_offset={}, row_gap={}, column_gap={}, label_value_gap={}, value_arrow_gap={}, button_top_gap={}, button_gap={}, font={}/{}",
-            skillPointsPerLevel, menuPanelWidth, menuPanelHeight, menuPanelYOffset,
-            menuSkillRowGap, menuSkillColumnGap, menuSkillLabelValueGap, menuSkillValueArrowGap,
-            menuSkillButtonTopGap, menuSkillButtonGap, menuFontSize, menuHeaderFontSize);
+        logger::info("[EA] Config: Skill allocation — points_per_level={}", skillPointsPerLevel);
         logger::info("[EA] Config: Skill cap - {:.1f}", skillCap);
         logger::info("[EA] Config: max_log_files={}", maxLogFiles);
         logger::info("[EA] Config: notifications_enabled={}", notificationsEnabled);
-        logger::info("[EA] Config: starting_skills.mode={}, settings_hotkey={}", mode, settingsHotkey);
+        logger::info("[EA] Config: starting_skills.mode={}", mode);
 
         // Dump the raw JSON only for explicitly verbose diagnostic sessions.
         if (verbose) {

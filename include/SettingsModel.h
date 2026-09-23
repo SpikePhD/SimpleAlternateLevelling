@@ -10,7 +10,7 @@
 namespace EA {
     enum class SettingSection {
         Progression, Quests, Kills, Exploration, Locks, Books, Pickpocket,
-        Starting, Allocation, Notifications, Interface, Advanced
+        Starting, Allocation, Notifications, Advanced
     };
 
     enum class SettingKind { Number, Integer, Toggle, StartingMode };
@@ -46,7 +46,6 @@ namespace EA {
         [[nodiscard]] const Json& Shipped() const { return shipped_; }
         [[nodiscard]] const std::vector<SettingDescriptor>& Registry() const { return registry_; }
         [[nodiscard]] bool Dirty() const;
-        [[nodiscard]] static bool ValidHotkey(double value);
 
     private:
         Json shipped_ = Json::object();

@@ -80,25 +80,6 @@ if(SAL_BUILD_PLUGIN)
         COMMENT "Verifying EA_SkillMenu.swf against tracked ActionScript"
         VERBATIM
     )
-    set(SAL_SETTINGS_SWF_TOOL_ARGS
-        --java "${SAL_JAVA_EXECUTABLE}"
-        --ffdec-jar "${SAL_FFDEC_JAR}"
-        --swf "${CMAKE_CURRENT_SOURCE_DIR}/data/Interface/SAL_SettingsMenu.swf"
-        --scripts "${CMAKE_CURRENT_SOURCE_DIR}/assets/settings_swf_src/scripts"
-        --work-dir "${CMAKE_CURRENT_BINARY_DIR}/settings_swf"
-    )
-    add_custom_target(rebuild_settings_menu
-        COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/skill_menu_swf.py"
-            rebuild ${SAL_SETTINGS_SWF_TOOL_ARGS}
-        COMMENT "Rebuilding SAL_SettingsMenu.swf with FFDec 25.1.3"
-        VERBATIM
-    )
-    add_custom_target(verify_settings_menu
-        COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/skill_menu_swf.py"
-            verify ${SAL_SETTINGS_SWF_TOOL_ARGS}
-        COMMENT "Verifying SAL_SettingsMenu.swf against tracked ActionScript"
-        VERBATIM
-    )
 
     set(SAL_PLUGIN_SOURCES
         src/main.cpp
@@ -112,7 +93,7 @@ if(SAL_BUILD_PLUGIN)
         src/Leveling.cpp
         src/SkillHook.cpp
         src/SkillMenu.cpp
-        src/SettingsMenu.cpp
+        src/SettingsPage.cpp
         src/EventSinks.cpp
     )
 
@@ -150,7 +131,9 @@ if(SAL_BUILD_PLUGIN)
 
     target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_23)
     target_precompile_headers(${PROJECT_NAME} PRIVATE include/PCH.h)
-    target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_include_directories(${PROJECT_NAME} PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/extern/SKSEMenuFramework)
     target_compile_definitions(${PROJECT_NAME} PRIVATE SAL_VERSION="${PROJECT_VERSION}")
     target_link_libraries(${PROJECT_NAME}
         PRIVATE
@@ -177,9 +160,6 @@ if(SAL_BUILD_PLUGIN)
                 "${CMAKE_CURRENT_SOURCE_DIR}/data/Interface/EA_SkillMenu.swf"
                 "${SAL_DEPLOY_DIR}/Interface/EA_SkillMenu.swf"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${CMAKE_CURRENT_SOURCE_DIR}/data/Interface/SAL_SettingsMenu.swf"
-                "${SAL_DEPLOY_DIR}/Interface/SAL_SettingsMenu.swf"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${CMAKE_CURRENT_SOURCE_DIR}/data/Interface/Translations/SimpleAlternateLevelling_ENGLISH.txt"
                 "${SAL_DEPLOY_DIR}/Interface/Translations/SimpleAlternateLevelling_ENGLISH.txt"
             COMMENT "Deploying plugin files to ${SAL_DEPLOY_DIR}"
@@ -194,7 +174,6 @@ if(SAL_BUILD_PLUGIN)
             --dll $<TARGET_FILE:${PROJECT_NAME}>
             --config "${CMAKE_CURRENT_SOURCE_DIR}/data/SKSE/Plugins/${PROJECT_NAME}.json"
             --swf "${CMAKE_CURRENT_SOURCE_DIR}/data/Interface/EA_SkillMenu.swf"
-            --settings-swf "${CMAKE_CURRENT_SOURCE_DIR}/data/Interface/SAL_SettingsMenu.swf"
             --translation "${CMAKE_CURRENT_SOURCE_DIR}/data/Interface/Translations/SimpleAlternateLevelling_ENGLISH.txt"
             --output-dir "${SAL_PACKAGE_DIR}"
             --version "${PROJECT_VERSION}"
@@ -247,9 +226,6 @@ if(BUILD_TESTS)
             --actionscript "${CMAKE_CURRENT_SOURCE_DIR}/assets/swf_src/scripts/frame_1/DoAction.as"
             --translation "${CMAKE_CURRENT_SOURCE_DIR}/data/Interface/Translations/SimpleAlternateLevelling_ENGLISH.txt"
             --swf "${CMAKE_CURRENT_SOURCE_DIR}/data/Interface/EA_SkillMenu.swf"
-            --settings-native "${CMAKE_CURRENT_SOURCE_DIR}/src/SettingsMenu.cpp"
-            --settings-actionscript "${CMAKE_CURRENT_SOURCE_DIR}/assets/settings_swf_src/scripts/frame_1/DoAction.as"
-            --settings-swf "${CMAKE_CURRENT_SOURCE_DIR}/data/Interface/SAL_SettingsMenu.swf"
             --defaults "${CMAKE_CURRENT_SOURCE_DIR}/data/SKSE/Plugins/${PROJECT_NAME}.json")
     add_test(NAME release_defaults
         COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_release_defaults.py"

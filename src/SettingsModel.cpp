@@ -62,8 +62,7 @@ namespace EA {
             if (key.starts_with("xp_sources.book.")) return SettingSection::Books;
             if (key.starts_with("xp_sources.pickpocket.")) return SettingSection::Pickpocket;
             if (key.starts_with("starting_skills.")) return SettingSection::Starting;
-            if (key == "skill_allocation.points_per_level" || key == "skill_allocation.skill_cap") return SettingSection::Allocation;
-            if (key.starts_with("skill_allocation.") || key.starts_with("interface.")) return SettingSection::Interface;
+            if (key.starts_with("skill_allocation.")) return SettingSection::Allocation;
             if (key.starts_with("notifications.")) return SettingSection::Notifications;
             return SettingSection::Advanced;
         }
@@ -93,11 +92,6 @@ namespace EA {
         }
     }
 
-    bool SettingsModel::ValidHotkey(double value)
-    {
-        return std::isfinite(value) && std::trunc(value) == value && value >= 0 && value <= 255;
-    }
-
     void SettingsModel::BuildRegistry()
     {
         registry_.clear();
@@ -125,20 +119,8 @@ namespace EA {
                 } else if (key == "skill_allocation.skill_cap") {
                     descriptor.minimum = 1;
                     descriptor.maximum = 1000;
-                } else if (key == "interface.settings_hotkey") {
-                    descriptor.maximum = 255;
                 } else if (key == "debug.max_log_files") {
                     descriptor.maximum = 1000;
-                } else if (key.starts_with("skill_allocation.")) {
-                    if (key == "skill_allocation.panel_width") { descriptor.minimum = 480; descriptor.maximum = 1280; }
-                    else if (key == "skill_allocation.panel_height") descriptor.maximum = 720;
-                    else if (key == "skill_allocation.panel_y_offset") { descriptor.minimum = -360; descriptor.maximum = 360; }
-                    else if (key == "skill_allocation.row_gap") { descriptor.minimum = 24; descriptor.maximum = 72; }
-                    else if (key == "skill_allocation.column_gap") descriptor.maximum = 200;
-                    else if (key == "skill_allocation.button_row_offset") { descriptor.minimum = -72; descriptor.maximum = 120; }
-                    else if (key == "skill_allocation.font_size") { descriptor.minimum = 8; descriptor.maximum = 40; }
-                    else if (key == "skill_allocation.header_font_size") { descriptor.minimum = 10; descriptor.maximum = 48; }
-                    else descriptor.maximum = 120;
                 } else if (key.starts_with("xp_sources.")) {
                     descriptor.maximum = 100000;
                     descriptor.step = key.ends_with("multiplier") || key.ends_with("factor") ? 0.1 : 1;
@@ -163,7 +145,6 @@ namespace EA {
         try { number = value.get<double>(); }
         catch (const Json::exception&) { return false; }
         if (!std::isfinite(number) || number < descriptor.minimum || number > descriptor.maximum) return false;
-        if (descriptor.key == "skill_allocation.panel_height" && number != 0 && number < 300) return false;
         return descriptor.kind != SettingKind::Integer || std::trunc(number) == number;
     }
 

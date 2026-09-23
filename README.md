@@ -85,7 +85,6 @@ mod manager. The archive contains exactly these Data-relative paths:
 
 ```text
 Interface/EA_SkillMenu.swf
-Interface/SAL_SettingsMenu.swf
 Interface/Translations/SimpleAlternateLevelling_ENGLISH.txt
 SKSE/Plugins/SimpleAlternateLevelling.dll
 SKSE/Plugins/SimpleAlternateLevelling.json
@@ -97,9 +96,12 @@ Allocations are previews until Confirm is activated. Reset discards the preview,
 while Confirm, `C`, or Escape atomically applies it and continues to Skyrim's
 vanilla attribute-selection menu. The final point does not auto-confirm.
 
-Use the mouse or keyboard. Arrow keys navigate the three-column skill grid and
-Reset/Confirm row, Tab and Shift+Tab cycle controls, Enter or Space activates the
-selection, `R` resets, and `C` confirms. Controller navigation is not supported.
+Each skill has - and + buttons; points added in this session show as a gold
+"+N", and capped skills show "Max". Use the mouse or keyboard: arrow keys move
+through the Combat, Magic, and Stealth columns and the Reset/Confirm row, Enter
+or `+` adds a point, Backspace or `-` removes one, Tab and Shift+Tab cycle
+controls, `R` resets, and `C` or Escape confirms. Controller navigation is not
+supported.
 
 UI strings use Skyrim translation files. Additional languages can provide
 `Interface/Translations/SimpleAlternateLevelling_<LANGUAGE>.txt` with the same
@@ -107,20 +109,18 @@ UI strings use Skyrim translation files. Additional languages can provide
 
 ## In-game settings
 
-Press **F10** during gameplay to open the separate SAL Settings menu. The
-hotkey is the DirectInput keyboard scan code in `interface.settings_hotkey`
-(default `68`, F10; `0` disables it). The menu requires no SkyUI, MCM, Papyrus,
-or plugin file. It uses the mouse for sections, presets, toggles, and numeric
-editing. Enter commits a focused numeric field. Escape cancels the draft.
+In-game settings use [SKSE Menu Framework](https://www.nexusmods.com/skyrimspecialedition/mods/120352),
+an optional dependency. Open its Mod Control Panel (F1 by default) and choose
+**Simple Alternate Levelling / Settings**. Without the framework, edit
+`SimpleAlternateLevelling.user.json` instead; SAL works the same either way.
 
-Sections cover the XP threshold curve, quest and kill rewards, exploration,
-locks, books, pickpocketing, starting skills, skill allocation, notifications,
-interface layout, and debug settings. Every numeric or Boolean setting in the
-shipped JSON is available. Notification message text remains editable in JSON.
-Use **Apply** to save, **Cancel** to discard, **Reset Section** to restore one
-section's shipped values, or **Reset All** to restore every shipped value.
-Presets include SAL Default, Faster/Slower Progression, Vanilla-ish Curve,
-Zero-Skill Start, and Custom Skill Start. Presets change the draft until Apply.
+Like MCM, changes are saved and take effect as soon as you finish editing a
+value. Sections cover progression, quest, kill, exploration, lock, book, and
+pickpocket XP, starting skills, skill points, notifications, and advanced
+settings. Values that differ from the default are highlighted, and hovering a
+setting shows what it does and its default. Each section has **Reset section**;
+**Reset all to defaults** asks for a second click. Presets include SAL Default,
+Faster/Slower Progression, Vanilla Curve, Zero-Skill Start, and Custom Skill Start.
 
 Starting skills can stay vanilla, begin at zero, begin at one chosen value, or
 use separate values for all 18 skills. This choice is captured at new-character
@@ -147,8 +147,6 @@ FFDec 25.1.3 jar, then run:
 ```powershell
 cmake --build --preset windows-release-tests --target rebuild_skill_menu
 cmake --build --preset windows-release-tests --target verify_skill_menu
-cmake --build --preset windows-release-tests --target rebuild_settings_menu
-cmake --build --preset windows-release-tests --target verify_settings_menu
 ```
 
 The official `ffdec_25.1.3.zip` SHA-256 is

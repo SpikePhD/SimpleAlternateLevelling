@@ -153,7 +153,7 @@ namespace EA::EventSinks {
             }
 
             auto typeKey = ClassifyMarkerType(static_cast<RE::MARKER_TYPE>(event->mapMarkerData->type.underlying()));
-            auto reward = Config::GetReward(Config::locationDiscoveryRewards, typeKey, Config::xpLocationDiscovered);
+            auto reward = Config::GetReward(Config::locationDiscoveryRewards, typeKey, Config::kDefaultLocationDiscoveredXP);
             const char* name = event->mapMarkerData->locationName.GetFullName();
             const auto subject = (name && name[0]) ? name : "Location Discovered";
 
@@ -315,7 +315,7 @@ namespace EA::EventSinks {
                     continue;
                 }
                 auto typeKey = ClassifyLocation(location);
-                auto reward = Config::GetReward(Config::locationClearingRewards, typeKey, Config::xpLocationCleared);
+                auto reward = Config::GetReward(Config::locationClearingRewards, typeKey, Config::kDefaultLocationClearedXP);
                 auto* name = location->GetFullName();
                 auto subject = (name && name[0]) ? name : "Location Cleared";
 

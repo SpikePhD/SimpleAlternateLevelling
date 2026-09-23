@@ -69,9 +69,6 @@ jobs:
       - name: Verify skill-menu SWF
         run: cmake --build --preset windows-release-tests --target verify_skill_menu
 
-      - name: Verify settings-menu SWF
-        run: cmake --build --preset windows-release-tests --target verify_settings_menu
-
       - name: Read project version
         shell: pwsh
         run: |
@@ -110,7 +107,6 @@ jobs:
           }
           $expectedEntries = @(
             "Interface/EA_SkillMenu.swf",
-            "Interface/SAL_SettingsMenu.swf",
             "Interface/Translations/SimpleAlternateLevelling_ENGLISH.txt",
             "SKSE/Plugins/SimpleAlternateLevelling.dll",
             "SKSE/Plugins/SimpleAlternateLevelling.json"

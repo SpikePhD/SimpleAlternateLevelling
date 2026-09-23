@@ -1,321 +1,462 @@
 // Simple Alternate Levelling - transactional skill allocation UI (AS2)
+//
+// Skyrim-style layout: dimmed full-screen backdrop, centred header, three
+// labelled skill groups with -/+ per skill, and text-style footer buttons.
+// All values are previews; the plugin validates and commits on Confirm.
 
 Stage.scaleMode = "showAll";
 Stage.align = "";
 
 var g_skillData = [];
 var g_remainingPoints = 0;
+var g_totalPoints = 0;
 var g_carryOver = 0;
 var g_skillCap = 200;
-var g_levelTFs = {};
-var g_headerTF = undefined;
-var g_controls = [];
-var g_selected = 0;
 var g_closing = false;
-var g_pointsLabel = "Skill points to distribute:";
+var g_selected = 0;
+var g_lastColumn = 0;
+var g_rows = [];          // row movie clips, index = skill index
+var g_footer = [];        // [reset, confirm]
+var g_labels = {};
+var g_pointsTF = undefined;
+
+var g_pointsLabel = "Distribute Skill Points";
 var g_confirmLabel = "Confirm";
 var g_resetLabel = "Reset";
 
-var PANEL_W = 820;
-var PANEL_H = 0;
-var PANEL_Y_OFFSET = -90;
-var ROW_H = 36;
-var COLUMN_GAP = 22;
-var LABEL_VALUE_GAP = 4;
-var VALUE_ARROW_GAP = 2;
-var BUTTON_TOP_GAP = 18;
-var BUTTON_ROW_OFFSET = 12;
-var BUTTON_GAP = 16;
-var FONT_SIZE = 13;
-var HDR_FONT_SIZE = 16;
+// Layout on the 1280x720 stage.
+var STAGE_W = 1280;
+var STAGE_H = 720;
+var COL_W = 300;
+var COL_X = [160, 490, 820];
+var HEADING_Y = 206;
+var ROW_START_Y = 244;
+var ROW_H = 42;
+var FOOTER_Y = 532;
+var FOOTER_BTN_W = 170;
+var FOOTER_BTN_H = 40;
 
-var ROW_START_Y = 54;
-var BUTTON_H = 34;
-var AUTO_HEIGHT_BOTTOM_PAD = 22;
-var BTN_W = 28;
-var BTN_H = 28;
-var COL_X = [20, 312, 599];
+var RESET_INDEX = 18;
+var CONFIRM_INDEX = 19;
 
+var COLOR_TITLE = 0xEDE3C4;
 var COLOR_GOLD = 0xC8B878;
-var COLOR_BRIGHT = 0xFFD700;
-var COLOR_DISABLED = 0x777777;
-var COLOR_SELECTED = 0xFFFFBB;
+var COLOR_GOLD_BRIGHT = 0xF0CC5A;
+var COLOR_TEXT = 0xD8D2BE;
+var COLOR_WHITE = 0xFFFFFF;
+var COLOR_MUTED = 0x9A937E;
+var COLOR_DISABLED = 0x5E5A50;
 
-function EA_Init(skillData, totalPoints, carryOver, panelW, panelH, panelYOffset, rowGap, columnGap, labelValueGap, valueArrowGap, buttonTopGap, buttonRowOffset, buttonGap, fontSize, headerFontSize, pointsLabel, confirmLabel, resetLabel) {
+// ---------------------------------------------------------------------------
+// Plugin -> menu interface
+// ---------------------------------------------------------------------------
+
+// Argument order matches InvokeInit in src/SkillMenu.cpp.
+function EA_Init(skillData, totalPoints, carryOver, pointsLabel, confirmLabel, resetLabel, info) {
     g_skillData = skillData;
     g_remainingPoints = totalPoints;
-    g_carryOver = carryOver;
+    g_totalPoints = totalPoints;
+    g_carryOver = (carryOver != undefined) ? carryOver : 0;
     g_closing = false;
     if (g_skillData.length > 0 && g_skillData[0].skillCap != undefined) {
         g_skillCap = g_skillData[0].skillCap;
     }
-    for (var originalIndex = 0; originalIndex < g_skillData.length; originalIndex++) {
-        g_skillData[originalIndex].originalLevel = g_skillData[originalIndex].currentLevel;
+    for (var i = 0; i < g_skillData.length; i++) {
+        g_skillData[i].originalLevel = g_skillData[i].currentLevel;
+        g_skillData[i].delta = 0;
     }
-
-    if (panelW != undefined) { PANEL_W = panelW; }
-    if (panelH != undefined) { PANEL_H = panelH; }
-    if (panelYOffset != undefined) { PANEL_Y_OFFSET = panelYOffset; }
-    if (rowGap != undefined) { ROW_H = rowGap; }
-    if (columnGap != undefined) { COLUMN_GAP = columnGap; }
-    if (labelValueGap != undefined) { LABEL_VALUE_GAP = labelValueGap; }
-    if (valueArrowGap != undefined) { VALUE_ARROW_GAP = valueArrowGap; }
-    if (buttonTopGap != undefined) { BUTTON_TOP_GAP = buttonTopGap; }
-    if (buttonRowOffset != undefined) { BUTTON_ROW_OFFSET = buttonRowOffset; }
-    if (buttonGap != undefined) { BUTTON_GAP = buttonGap; }
-    if (fontSize != undefined) { FONT_SIZE = fontSize; }
-    if (headerFontSize != undefined) { HDR_FONT_SIZE = headerFontSize; }
     if (pointsLabel != undefined && pointsLabel.length > 0) { g_pointsLabel = pointsLabel; }
     if (confirmLabel != undefined && confirmLabel.length > 0) { g_confirmLabel = confirmLabel; }
     if (resetLabel != undefined && resetLabel.length > 0) { g_resetLabel = resetLabel; }
 
-    if (PANEL_H <= 0) { PANEL_H = _measureAutoPanelHeight(g_skillData); }
-    COL_X[0] = 20;
-    COL_X[1] = 290 + COLUMN_GAP;
-    COL_X[2] = 555 + COLUMN_GAP * 2;
-    _buildPanel();
-    _selectControl(0);
+    g_labels = {
+        level: 0, levelLabel: "Level", remainingLabel: "points remaining",
+        carriedLabel: "carried over from earlier levels", maxLabel: "Max",
+        combatLabel: "Combat", magicLabel: "Magic", stealthLabel: "Stealth", hint: ""
+    };
+    if (info != undefined) {
+        for (var key in g_labels) {
+            if (info[key] != undefined) { g_labels[key] = info[key]; }
+        }
+    }
+
+    _build();
+    _select(_firstEnabledRow());
 }
 
-function EA_UpdateSkill(actorValue, newLevel) {
-    var tf = g_levelTFs[actorValue];
-    if (tf != undefined) { tf.text = String(Math.floor(newLevel)); }
+function EA_UpdateSkill(actorValue, newLevel, delta) {
     for (var i = 0; i < g_skillData.length; i++) {
-        if (g_skillData[i].actorValue == actorValue) {
-            g_skillData[i].currentLevel = newLevel;
+        var sk = g_skillData[i];
+        if (sk.actorValue == actorValue) {
+            sk.currentLevel = newLevel;
+            sk.delta = (delta != undefined) ? delta : Math.max(0, Math.round(newLevel - sk.originalLevel));
+            _drawRow(i);
             break;
         }
     }
-    _refreshControls();
+    _refreshAll();
 }
 
 function EA_UpdatePoints(remaining) {
     g_remainingPoints = remaining;
-    _refreshHeader();
-    _refreshControls();
+    _refreshAll();
 }
 
 function EA_SetClosing() {
     g_closing = true;
-    _refreshControls();
+    _refreshAll();
 }
 
-function _makeFmt(size, bold, color, align) {
+// ---------------------------------------------------------------------------
+// Drawing helpers
+// ---------------------------------------------------------------------------
+
+function _fmt(size, color, align, spacing) {
     var fmt = new TextFormat();
     fmt.font = "$EverywhereMediumFont";
     fmt.size = size;
-    fmt.bold = bold;
     fmt.color = color;
-    if (align != undefined) { fmt.align = align; }
+    fmt.align = (align != undefined) ? align : "left";
+    if (spacing != undefined) { fmt.letterSpacing = spacing; }
     return fmt;
 }
 
-function _applyFmt(tf, fmt) {
+function _text(parent, name, depth, x, y, w, h, value, fmt) {
+    parent.createTextField(name, depth, x, y, w, h);
+    var tf = parent[name];
+    tf.selectable = false;
+    tf.setNewTextFormat(fmt);
+    tf.text = value;
+    tf.setTextFormat(fmt);
+    return tf;
+}
+
+function _setText(tf, value, fmt) {
+    tf.text = value;
     tf.setNewTextFormat(fmt);
     tf.setTextFormat(fmt);
 }
 
-function _refreshHeader() {
-    if (g_headerTF != undefined) {
-        g_headerTF.text = g_pointsLabel + "  " + g_remainingPoints;
-    }
+function _rect(mc, x, y, w, h, color, alpha) {
+    mc.beginFill(color, alpha);
+    mc.moveTo(x, y); mc.lineTo(x + w, y); mc.lineTo(x + w, y + h); mc.lineTo(x, y + h); mc.lineTo(x, y);
+    mc.endFill();
 }
 
-function _measureAutoPanelHeight(skillData) {
-    var maxRow = 0;
-    for (var i = 0; i < skillData.length; i++) {
-        if (skillData[i].row > maxRow) { maxRow = skillData[i].row; }
-    }
-    var buttonY = ROW_START_Y + (maxRow + 1) * ROW_H + BUTTON_TOP_GAP + BUTTON_ROW_OFFSET;
-    return buttonY + BUTTON_H + AUTO_HEIGHT_BOTTOM_PAD;
+// Horizontal bar that fades out at both ends.
+function _fadeBar(mc, x, y, w, h, color, peakAlpha) {
+    var matrix = { matrixType: "box", x: x, y: y, w: w, h: h, r: 0 };
+    mc.beginGradientFill("linear", [color, color, color], [0, peakAlpha, 0], [0, 127, 255], matrix);
+    mc.moveTo(x, y); mc.lineTo(x + w, y); mc.lineTo(x + w, y + h); mc.lineTo(x, y + h); mc.lineTo(x, y);
+    mc.endFill();
 }
 
-function _buildPanel() {
-    _root.panelMC.removeMovieClip();
-    g_levelTFs = {};
-    g_controls = [];
+// Vertical fade from alphaTop to alphaBottom.
+function _verticalFade(mc, x, y, w, h, color, alphaTop, alphaBottom) {
+    var matrix = { matrixType: "box", x: x, y: y, w: w, h: h, r: Math.PI / 2 };
+    mc.beginGradientFill("linear", [color, color], [alphaTop, alphaBottom], [0, 255], matrix);
+    mc.moveTo(x, y); mc.lineTo(x + w, y); mc.lineTo(x + w, y + h); mc.lineTo(x, y + h); mc.lineTo(x, y);
+    mc.endFill();
+}
 
-    var SW = (Stage.width > 0) ? Stage.width : 1280;
-    var SH = (Stage.height > 0) ? Stage.height : 720;
-    var pX = Math.floor((SW - PANEL_W) / 2);
-    var pY = Math.floor((SH - PANEL_H) / 2) + PANEL_Y_OFFSET;
-    pX = Math.max(0, Math.min(pX, Math.max(0, SW - PANEL_W)));
-    pY = Math.max(0, Math.min(pY, Math.max(0, SH - PANEL_H)));
+// ---------------------------------------------------------------------------
+// Layout
+// ---------------------------------------------------------------------------
 
-    var p = _root.createEmptyMovieClip("panelMC", 10);
-    p._x = pX;
-    p._y = pY;
-    p.beginFill(0x000000, 65);
-    p.moveTo(0, 0); p.lineTo(PANEL_W, 0); p.lineTo(PANEL_W, PANEL_H); p.lineTo(0, PANEL_H); p.endFill();
-    p.lineStyle(1, COLOR_GOLD, 50);
-    p.moveTo(0, 0); p.lineTo(PANEL_W, 0); p.lineTo(PANEL_W, PANEL_H); p.lineTo(0, PANEL_H); p.lineTo(0, 0);
+function _build() {
+    _root.menuMC.removeMovieClip();
+    var m = _root.createEmptyMovieClip("menuMC", 10);
+    g_rows = [];
+    g_footer = [];
 
-    p.createTextField("headerTF", 1, 10, 12, PANEL_W - 20, 28);
-    g_headerTF = p["headerTF"];
-    g_headerTF.selectable = false;
-    _applyFmt(g_headerTF, _makeFmt(HDR_FONT_SIZE, true, COLOR_BRIGHT, "center"));
-    _refreshHeader();
+    // Backdrop: hide the stats screen behind (its skill strip and attribute
+    // chooser otherwise show through the rows), darker at top and bottom.
+    var bg = m.createEmptyMovieClip("backdrop", 1);
+    _rect(bg, 0, 0, STAGE_W, STAGE_H, 0x000000, 86);
+    _verticalFade(bg, 0, 0, STAGE_W, 150, 0x000000, 70, 0);
+    _verticalFade(bg, 0, STAGE_H - 150, STAGE_W, 150, 0x000000, 0, 70);
+    // Darker band behind the skill grid, fading out towards the sides.
+    _fadeBar(bg, 0, HEADING_Y - 16, STAGE_W, FOOTER_Y - HEADING_Y - 4, 0x000000, 75);
+    bg.useHandCursor = false;
+    bg.onRelease = function() {};  // swallow clicks meant for the menu behind
+
+    var level = Number(g_labels.level);
+    var levelText = (level > 0) ? (g_labels.levelLabel + " " + level).toUpperCase() : "";
+    _text(m, "levelTF", 10, 0, 30, STAGE_W, 22, levelText, _fmt(13, COLOR_MUTED, "center", 4));
+    _text(m, "titleTF", 11, 0, 50, STAGE_W, 38, g_pointsLabel, _fmt(26, COLOR_TITLE, "center"));
+    g_pointsTF = _text(m, "pointsTF", 12, 0, 90, STAGE_W, 56, "", _fmt(42, COLOR_WHITE, "center"));
+    _text(m, "remainingTF", 13, 0, 144, STAGE_W, 22, g_labels.remainingLabel, _fmt(14, COLOR_MUTED, "center"));
+    if (g_carryOver > 0) {
+        _text(m, "carryTF", 14, 0, 164, STAGE_W, 20, "+" + g_carryOver + " " + g_labels.carriedLabel, _fmt(12, COLOR_GOLD, "center"));
+    }
+
+    var lines = m.createEmptyMovieClip("lines", 20);
+    _fadeBar(lines, 160, 192, 960, 1, COLOR_GOLD, 70);
+    _fadeBar(lines, 160, FOOTER_Y - 18, 960, 1, COLOR_GOLD, 70);
+
+    var groups = [g_labels.combatLabel, g_labels.magicLabel, g_labels.stealthLabel];
+    for (var c = 0; c < 3; c++) {
+        _text(m, "group" + c, 30 + c, COL_X[c], HEADING_Y, COL_W, 24, String(groups[c]).toUpperCase(), _fmt(14, COLOR_GOLD, "center", 4));
+        _fadeBar(lines, COL_X[c] + 20, HEADING_Y + 28, COL_W - 40, 1, COLOR_GOLD, 55);
+    }
 
     var depth = 100;
     for (var i = 0; i < g_skillData.length; i++) {
         var sk = g_skillData[i];
-        var rx = COL_X[sk.column];
-        var ry = ROW_START_Y + sk.row * ROW_H;
-        p.createTextField("sn" + i, depth++, rx, ry + 4, 146, 24);
-        var nameTF = p["sn" + i];
-        nameTF.selectable = false;
-        _applyFmt(nameTF, _makeFmt(FONT_SIZE, false, COLOR_GOLD));
-        nameTF.text = sk.name;
-
-        p.createTextField("sl" + i, depth++, rx + 146 + LABEL_VALUE_GAP, ry + 4, 34, 24);
-        var levelTF = p["sl" + i];
-        levelTF.selectable = false;
-        _applyFmt(levelTF, _makeFmt(FONT_SIZE, false, COLOR_GOLD, "right"));
-        levelTF.text = String(Math.floor(sk.currentLevel));
-        g_levelTFs[sk.actorValue] = levelTF;
-
-        var arrow = p.createEmptyMovieClip("btn" + i, depth++);
-        arrow._x = rx + 146 + LABEL_VALUE_GAP + 34 + VALUE_ARROW_GAP;
-        arrow._y = ry + 2;
-        arrow.kind = "skill";
-        arrow.skillIndex = i;
-        arrow.actorValue = sk.actorValue;
-        g_controls.push(arrow);
-        _wireControl(arrow, i);
+        var row = m.createEmptyMovieClip("row" + i, depth++);
+        row._x = COL_X[sk.column];
+        row._y = ROW_START_Y + sk.row * ROW_H;
+        row.skillIndex = i;
+        _buildRow(row, sk);
+        g_rows[i] = row;
     }
 
-    var btnW = 140;
-    var totalBtnW = btnW * 2 + BUTTON_GAP;
-    var btnY = ROW_START_Y + 6 * ROW_H + BUTTON_TOP_GAP + BUTTON_ROW_OFFSET;
-    var btnStartX = Math.floor((PANEL_W - totalBtnW) / 2);
+    var footerX = Math.floor(STAGE_W / 2);
+    var reset = m.createEmptyMovieClip("resetMC", depth++);
+    reset._x = footerX - FOOTER_BTN_W - 20; reset._y = FOOTER_Y; reset.kind = "reset"; reset.label = g_resetLabel;
+    var confirm = m.createEmptyMovieClip("confirmMC", depth++);
+    confirm._x = footerX + 20; confirm._y = FOOTER_Y; confirm.kind = "confirm"; confirm.label = g_confirmLabel;
+    g_footer = [reset, confirm];
+    for (var f = 0; f < 2; f++) {
+        var btn = g_footer[f];
+        btn.index = RESET_INDEX + f;
+        btn.createEmptyMovieClip("bg", 1);
+        _text(btn, "lbl", 2, 0, 9, FOOTER_BTN_W, 24, btn.label, _fmt(17, COLOR_TEXT, "center"));
+        btn.onRollOver = function() { _select(this.index); };
+        btn.onRelease = function() { _activate(this.index); };
+    }
 
-    var reset = p.createEmptyMovieClip("resetMC", depth++);
-    reset._x = btnStartX; reset._y = btnY; reset.kind = "reset";
-    g_controls.push(reset); _wireControl(reset, g_controls.length - 1);
-
-    var confirm = p.createEmptyMovieClip("confirmMC", depth++);
-    confirm._x = btnStartX + btnW + BUTTON_GAP; confirm._y = btnY; confirm.kind = "confirm";
-    g_controls.push(confirm); _wireControl(confirm, g_controls.length - 1);
-    _refreshControls();
+    if (g_labels.hint != undefined && g_labels.hint.length > 0) {
+        _text(m, "hintTF", depth++, 0, FOOTER_Y + 62, STAGE_W, 20, g_labels.hint, _fmt(12, COLOR_MUTED, "center"));
+    }
+    _refreshAll();
 }
 
-function _wireControl(mc, index) {
-    mc.controlIndex = index;
-    mc.useHandCursor = true;
-    mc.onRollOver = function() { _selectControl(this.controlIndex); };
-    mc.onRelease = function() { _activateControl(this.controlIndex); };
+function _buildRow(row, sk) {
+    row.createEmptyMovieClip("highlight", 1);
+
+    // Hover target for the whole row; sits below the -/+ buttons.
+    var hit = row.createEmptyMovieClip("hit", 2);
+    _rect(hit, -10, 0, COL_W + 20, ROW_H - 4, 0x000000, 0);
+    hit.skillIndex = row.skillIndex;
+    hit.useHandCursor = false;
+    hit.onRollOver = function() { _select(this.skillIndex); };
+    hit.onRelease = function() { _select(this.skillIndex); };
+
+    _text(row, "nameTF", 3, 8, 8, 150, 26, sk.name, _fmt(16, COLOR_TEXT));
+    _text(row, "deltaTF", 4, 136, 11, 52, 22, "", _fmt(13, COLOR_GOLD_BRIGHT, "right"));
+    _text(row, "valueTF", 5, 226, 6, 48, 30, "", _fmt(18, COLOR_WHITE, "center"));
+
+    var minus = row.createEmptyMovieClip("minusMC", 6);
+    minus._x = 214; minus._y = 19; minus.sign = -1;
+    var plus = row.createEmptyMovieClip("plusMC", 7);
+    plus._x = 286; plus._y = 19; plus.sign = 1;
+    var buttons = [minus, plus];
+    for (var b = 0; b < 2; b++) {
+        var btn = buttons[b];
+        btn.skillIndex = row.skillIndex;
+        btn.onRollOver = function() { _select(this.skillIndex); };
+        btn.onRelease = function() {
+            _select(this.skillIndex);
+            if (this.sign > 0) { _allocate(this.skillIndex); } else { _deallocate(this.skillIndex); }
+        };
+    }
+    _drawRow(row.skillIndex);
+}
+
+// ---------------------------------------------------------------------------
+// State and rendering
+// ---------------------------------------------------------------------------
+
+function _canAdd(i) {
+    return !g_closing && g_remainingPoints > 0 && g_skillData[i].currentLevel < g_skillCap;
+}
+
+function _canRemove(i) {
+    return !g_closing && g_skillData[i].delta > 0;
 }
 
 function _hasChanges() {
     for (var i = 0; i < g_skillData.length; i++) {
-        if (g_skillData[i].currentLevel != g_skillData[i].originalLevel) { return true; }
+        if (g_skillData[i].delta > 0) { return true; }
     }
     return false;
 }
 
-function _isDisabled(control) {
+function _footerDisabled(index) {
     if (g_closing) { return true; }
-    if (control.kind == "skill") {
-        return g_remainingPoints <= 0 || g_skillData[control.skillIndex].currentLevel >= g_skillCap;
+    return index == RESET_INDEX && !_hasChanges();
+}
+
+function _drawSignButton(btn, enabled, emphasised) {
+    btn.clear();
+    // Transparent disc keeps the whole button clickable.
+    btn.beginFill(0x000000, 0);
+    btn.moveTo(-14, -14); btn.lineTo(14, -14); btn.lineTo(14, 14); btn.lineTo(-14, 14); btn.lineTo(-14, -14);
+    btn.endFill();
+    var color = enabled ? (emphasised ? COLOR_WHITE : COLOR_GOLD) : COLOR_DISABLED;
+    var alpha = enabled ? 100 : 60;
+    btn.lineStyle(1, color, enabled ? 70 : 40);
+    var r = 11;
+    // Octagon approximates a circle without relying on curveTo support.
+    for (var k = 0; k <= 8; k++) {
+        var angle = k * Math.PI / 4 + Math.PI / 8;
+        var px = Math.cos(angle) * r; var py = Math.sin(angle) * r;
+        if (k == 0) { btn.moveTo(px, py); } else { btn.lineTo(px, py); }
     }
-    if (control.kind == "reset") { return !_hasChanges(); }
-    return false;
+    btn.lineStyle(2, color, alpha);
+    btn.moveTo(-5, 0); btn.lineTo(5, 0);
+    if (btn.sign > 0) { btn.moveTo(0, -5); btn.lineTo(0, 5); }
+    btn.useHandCursor = enabled;
+    btn.enabled = true;
 }
 
-function _refreshControls() {
-    for (var i = 0; i < g_controls.length; i++) { _drawControl(g_controls[i], i == g_selected); }
+function _drawRow(i) {
+    var row = g_rows[i];
+    if (row == undefined) { return; }
+    var sk = g_skillData[i];
+    var selected = (i == g_selected);
+    var atCap = sk.currentLevel >= g_skillCap;
+
+    row.highlight.clear();
+    if (selected && !g_closing) {
+        _fadeBar(row.highlight, -10, 1, COL_W + 20, ROW_H - 6, COLOR_GOLD, 22);
+        _fadeBar(row.highlight, -10, 0, COL_W + 20, 1, COLOR_GOLD, 70);
+        _fadeBar(row.highlight, -10, ROW_H - 5, COL_W + 20, 1, COLOR_GOLD, 70);
+    }
+
+    _setText(row.nameTF, sk.name, _fmt(16, selected ? COLOR_WHITE : COLOR_TEXT));
+    var valueColor = atCap ? COLOR_GOLD : (sk.delta > 0 ? COLOR_GOLD_BRIGHT : COLOR_WHITE);
+    _setText(row.valueTF, String(Math.floor(sk.currentLevel)), _fmt(18, valueColor, "center"));
+    var deltaText = "";
+    if (sk.delta > 0) { deltaText = "+" + sk.delta; }
+    else if (atCap) { deltaText = g_labels.maxLabel; }
+    _setText(row.deltaTF, deltaText, _fmt(13, sk.delta > 0 ? COLOR_GOLD_BRIGHT : COLOR_MUTED, "right"));
+
+    _drawSignButton(row.minusMC, _canRemove(i), selected);
+    _drawSignButton(row.plusMC, _canAdd(i), selected);
 }
 
-function _selectControl(index) {
-    if (index < 0 || index >= g_controls.length) { return; }
-    g_selected = index;
-    _refreshControls();
-}
-
-function _drawControl(mc, selected) {
-    var disabled = _isDisabled(mc);
-    mc.disabled = disabled;
-    mc.useHandCursor = !disabled;
-    var lineColor = disabled ? COLOR_DISABLED : (selected ? COLOR_SELECTED : COLOR_GOLD);
-    var fillAlpha = disabled ? 18 : (selected ? 65 : 35);
-    var width = (mc.kind == "skill") ? BTN_W : 140;
-    mc.clear();
-    mc.beginFill(0x333333, fillAlpha);
-    mc.moveTo(0, 0); mc.lineTo(width, 0); mc.lineTo(width, (mc.kind == "skill") ? BTN_H : BUTTON_H);
-    mc.lineTo(0, (mc.kind == "skill") ? BTN_H : BUTTON_H); mc.endFill();
-    mc.lineStyle(selected ? 2 : 1, lineColor, disabled ? 40 : 90);
-    mc.moveTo(0, 0); mc.lineTo(width, 0); mc.lineTo(width, (mc.kind == "skill") ? BTN_H : BUTTON_H);
-    mc.lineTo(0, (mc.kind == "skill") ? BTN_H : BUTTON_H); mc.lineTo(0, 0);
-
-    if (mc.kind == "skill") {
-        var cx = BTN_W / 2; var cy = BTN_H / 2;
-        mc.lineStyle(2, lineColor, disabled ? 40 : 100);
-        mc.moveTo(cx - 3, cy - 5); mc.lineTo(cx + 4, cy); mc.lineTo(cx - 3, cy + 5);
+function _drawFooter(index) {
+    var btn = g_footer[index - RESET_INDEX];
+    var selected = (index == g_selected);
+    var disabled = _footerDisabled(index);
+    btn.bg.clear();
+    if (selected && !disabled) {
+        _fadeBar(btn.bg, -30, 0, FOOTER_BTN_W + 60, FOOTER_BTN_H, COLOR_GOLD, 30);
+        _fadeBar(btn.bg, 0, FOOTER_BTN_H - 1, FOOTER_BTN_W, 2, COLOR_GOLD_BRIGHT, 100);
     } else {
-        if (mc["lbl"] == undefined) {
-            mc.createTextField("lbl", 0, 0, 6, 140, 22);
-            mc["lbl"].selectable = false;
-        }
-        _applyFmt(mc["lbl"], _makeFmt(FONT_SIZE + 1, true, disabled ? COLOR_DISABLED : COLOR_BRIGHT, "center"));
-        mc["lbl"].text = (mc.kind == "reset") ? g_resetLabel : g_confirmLabel;
+        _fadeBar(btn.bg, 20, FOOTER_BTN_H - 1, FOOTER_BTN_W - 40, 1, COLOR_GOLD, disabled ? 25 : 60);
+    }
+    // Transparent fill keeps the button clickable across its full area.
+    _rect(btn.bg, 0, 0, FOOTER_BTN_W, FOOTER_BTN_H, 0x000000, 0);
+    var color = disabled ? COLOR_DISABLED : (selected ? COLOR_WHITE : (btn.kind == "confirm" ? COLOR_GOLD_BRIGHT : COLOR_TEXT));
+    _setText(btn.lbl, btn.label, _fmt(17, color, "center"));
+    btn.useHandCursor = !disabled;
+}
+
+function _refreshAll() {
+    if (g_pointsTF != undefined) {
+        _setText(g_pointsTF, String(g_remainingPoints), _fmt(42, g_remainingPoints > 0 ? COLOR_WHITE : COLOR_MUTED, "center"));
+    }
+    for (var i = 0; i < g_rows.length; i++) { _drawRow(i); }
+    if (g_footer.length == 2) {
+        _drawFooter(RESET_INDEX);
+        _drawFooter(CONFIRM_INDEX);
     }
 }
 
-function _activateControl(index) {
-    if (g_closing || index < 0 || index >= g_controls.length) { return; }
-    var control = g_controls[index];
-    if (_isDisabled(control)) { return; }
-    if (control.kind == "skill") {
-        gfx.io.GameDelegate.call("EA_OnAllocate", [control.actorValue]);
-    } else if (control.kind == "reset") {
+// ---------------------------------------------------------------------------
+// Actions (menu -> plugin)
+// ---------------------------------------------------------------------------
+
+function _allocate(i) {
+    if (!_canAdd(i)) { return; }
+    gfx.io.GameDelegate.call("EA_OnAllocate", [g_skillData[i].actorValue]);
+}
+
+function _deallocate(i) {
+    if (!_canRemove(i)) { return; }
+    gfx.io.GameDelegate.call("EA_OnDeallocate", [g_skillData[i].actorValue]);
+}
+
+function _activate(index) {
+    if (g_closing) { return; }
+    if (index < RESET_INDEX) { _allocate(index); return; }
+    if (_footerDisabled(index)) { return; }
+    if (index == RESET_INDEX) {
         gfx.io.GameDelegate.call("EA_OnReset", []);
-    } else if (control.kind == "confirm") {
+    } else if (index == CONFIRM_INDEX) {
         g_closing = true;
-        _refreshControls();
+        _refreshAll();
         gfx.io.GameDelegate.call("EA_OnConfirm", []);
     }
 }
 
-function _findSkillControl(column, row) {
-    for (var i = 0; i < 18; i++) {
-        var sk = g_skillData[g_controls[i].skillIndex];
-        if (sk.column == column && sk.row == row) { return i; }
+// ---------------------------------------------------------------------------
+// Selection and keyboard navigation
+// ---------------------------------------------------------------------------
+
+function _select(index) {
+    if (index < 0 || index > CONFIRM_INDEX) { return; }
+    var previous = g_selected;
+    g_selected = index;
+    if (index < RESET_INDEX) { g_lastColumn = g_skillData[index].column; }
+    if (previous < RESET_INDEX) { _drawRow(previous); } else if (g_footer.length == 2) { _drawFooter(previous); }
+    if (index < RESET_INDEX) { _drawRow(index); } else if (g_footer.length == 2) { _drawFooter(index); }
+}
+
+function _firstEnabledRow() {
+    return 0;
+}
+
+function _findRow(column, row) {
+    for (var i = 0; i < g_skillData.length; i++) {
+        if (g_skillData[i].column == column && g_skillData[i].row == row) { return i; }
     }
     return -1;
 }
 
-function _moveGrid(keyCode) {
-    var control = g_controls[g_selected];
-    if (control.kind != "skill") {
-        if (keyCode == Key.LEFT || keyCode == Key.RIGHT) { _selectControl(g_selected == 18 ? 19 : 18); }
-        else if (keyCode == Key.UP) { _selectControl(g_selected == 18 ? _findSkillControl(0, 5) : _findSkillControl(2, 5)); }
+function _navigate(code) {
+    if (g_selected >= RESET_INDEX) {
+        if (code == Key.LEFT || code == Key.RIGHT) { _select(g_selected == RESET_INDEX ? CONFIRM_INDEX : RESET_INDEX); }
+        else if (code == Key.UP) { _select(_findRow(g_lastColumn, 5)); }
         return;
     }
-    var sk = g_skillData[control.skillIndex];
-    var column = sk.column; var row = sk.row;
-    if (keyCode == Key.LEFT) { column = Math.max(0, column - 1); }
-    if (keyCode == Key.RIGHT) { column = Math.min(2, column + 1); }
-    if (keyCode == Key.UP) { row = Math.max(0, row - 1); }
-    if (keyCode == Key.DOWN) {
-        if (row == 5) { _selectControl(column < 2 ? 18 : 19); return; }
+    var sk = g_skillData[g_selected];
+    var column = sk.column;
+    var row = sk.row;
+    if (code == Key.LEFT) { column = Math.max(0, column - 1); }
+    if (code == Key.RIGHT) { column = Math.min(2, column + 1); }
+    if (code == Key.UP) { row = Math.max(0, row - 1); }
+    if (code == Key.DOWN) {
+        if (row == 5) { _select(column < 2 ? RESET_INDEX : CONFIRM_INDEX); return; }
         row++;
     }
-    var next = _findSkillControl(column, row);
-    if (next >= 0) { _selectControl(next); }
+    var next = _findRow(column, row);
+    if (next >= 0) { _select(next); }
 }
 
 var g_keyListener = {};
 g_keyListener.onKeyDown = function() {
-    if (g_closing || g_controls.length == 0) { return; }
+    if (g_closing || g_rows.length == 0) { return; }
     var code = Key.getCode();
-    if (code == Key.ESCAPE || code == 27 || code == 67) { _activateControl(19); return; }
-    if (code == 82) { _activateControl(18); return; }
-    if (code == Key.ENTER || code == 13 || code == 32) { _activateControl(g_selected); return; }
-    if (code == Key.TAB || code == 9) {
-        var direction = Key.isDown(Key.SHIFT) ? -1 : 1;
-        _selectControl((g_selected + direction + g_controls.length) % g_controls.length);
+    if (code == Key.ESCAPE || code == 27 || code == 67) { _activate(CONFIRM_INDEX); return; }
+    if (code == 82) { _activate(RESET_INDEX); return; }
+    if (code == Key.ENTER || code == 13 || code == 32 || code == 187 || code == 107 || code == 61) {
+        _activate(g_selected);
         return;
     }
-    if (code == Key.LEFT || code == Key.RIGHT || code == Key.UP || code == Key.DOWN) { _moveGrid(code); }
+    if (code == Key.BACKSPACE || code == 8 || code == Key.DELETEKEY || code == 46 ||
+        code == 189 || code == 109 || code == 173) {
+        if (g_selected < RESET_INDEX) { _deallocate(g_selected); }
+        return;
+    }
+    if (code == Key.TAB || code == 9) {
+        var direction = Key.isDown(Key.SHIFT) ? -1 : 1;
+        _select((g_selected + direction + CONFIRM_INDEX + 1) % (CONFIRM_INDEX + 1));
+        return;
+    }
+    if (code == Key.LEFT || code == Key.RIGHT || code == Key.UP || code == Key.DOWN) { _navigate(code); }
 };
 Key.addListener(g_keyListener);

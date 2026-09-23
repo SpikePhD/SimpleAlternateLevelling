@@ -26,10 +26,6 @@ int main()
     assert(ValidateInteger(361.0, -90, -360, 360).replaced);
     assert(ValidateInteger(1.5, 10, 0, 1000).replaced);
     assert(ValidateInteger(std::numeric_limits<double>::infinity(), 10, 0, 1000).replaced);
-    assert(ValidatePanelHeight(0.0, 0).value == 0);
-    assert(ValidatePanelHeight(300.0, 0).value == 300);
-    assert(ValidatePanelHeight(720.0, 0).value == 720);
-    assert(ValidatePanelHeight(299.0, 0).replaced);
     assert(!ValidateFloat(200.5, 200.0f, 1.0f, 1000.0f).replaced);
     assert(!ValidateFloat(1.0, 200.0f, 1.0f, 1000.0f).replaced);
     assert(!ValidateFloat(1000.0, 200.0f, 1.0f, 1000.0f).replaced);
@@ -90,6 +86,31 @@ int main()
     session.MarkClosing();
     assert(session.State() == SessionState::kClosing);
     assert(session.Allocate(0) == AllocationResult::kInvalidState);
+
+    session.Cancel();
+    assert(session.Begin(3, 200.0f, levels));
+    assert(session.Deallocate(0) == AllocationResult::kNothingToRemove);
+    assert(session.Allocate(0) == AllocationResult::kAllocated);
+    assert(session.Allocate(0) == AllocationResult::kAllocated);
+    assert(session.Deallocate(0) == AllocationResult::kAllocated);
+    assert(session.Preview(0) == 16.0f);
+    assert(session.Delta(0) == 1);
+    assert(session.RemainingPoints() == 2);
+    assert(session.Deallocate(0) == AllocationResult::kAllocated);
+    assert(session.Preview(0) == 15.0f);
+    assert(!session.HasChanges());
+    assert(session.Deallocate(0) == AllocationResult::kNothingToRemove);
+    assert(session.Deallocate(kSkillCount) == AllocationResult::kInvalidSkill);
+
+    session.Cancel();
+    auto nearCap = Levels(199.5f);
+    assert(session.Begin(2, 200.0f, nearCap));
+    assert(session.Allocate(0) == AllocationResult::kAllocated);
+    assert(session.Preview(0) == 200.0f);
+    assert(session.Deallocate(0) == AllocationResult::kAllocated);
+    assert(session.Preview(0) == 199.5f);
+    session.MarkClosing();
+    assert(session.Deallocate(0) == AllocationResult::kInvalidState);
 
     session.Cancel();
     levels[4] = std::numeric_limits<float>::quiet_NaN();

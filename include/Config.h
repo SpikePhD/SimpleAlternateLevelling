@@ -22,7 +22,6 @@ namespace EA::Config {
     inline StartingSkillsMode startingSkillsMode = StartingSkillsMode::Vanilla;
     inline float startingSkillsUniformValue = 0.0f;
     inline std::unordered_map<std::string, float> startingSkillsCustom{};
-    inline int settingsHotkey = 0x44; // F10 DirectInput scan code
 
     // Notifications
     inline bool notificationsEnabled = true;
@@ -36,13 +35,11 @@ namespace EA::Config {
     inline float xpQuestCompanions = 50.0f;
     inline float xpQuestSide     = 50.0f;
     inline float xpQuestMisc     = 25.0f;
-    inline float xpQuestFaction  = 50.0f;
     inline float xpQuestDaedric  = 75.0f;
     inline float xpQuestCivilWar = 75.0f;
     inline float xpQuestDawnguard = 50.0f;
     inline float xpQuestDragonborn = 75.0f;
     inline float xpQuestObjectives = 10.0f;
-    inline float xpQuestDLC      = 50.0f;
     inline float xpQuestOther    = 25.0f;
 
     // Kill XP — type-based base + level-delta bonus
@@ -66,9 +63,10 @@ namespace EA::Config {
     inline float bookValueMultiplier = 1.0f;
     inline float bookReadingMultiplier = 1.0f;
 
-    // Location XP
-    inline float xpLocationDiscovered = 10.0f;
-    inline float xpLocationCleared    = 15.0f;
+    // Location XP, per location type. Each map's "default" entry covers
+    // unclassified locations; the constants apply only if JSON lacks both.
+    inline constexpr float kDefaultLocationDiscoveredXP = 10.0f;
+    inline constexpr float kDefaultLocationClearedXP    = 15.0f;
     inline std::unordered_map<std::string, float> locationDiscoveryRewards{};
     inline std::unordered_map<std::string, float> locationClearingRewards{};
 
@@ -94,40 +92,16 @@ namespace EA::Config {
     inline int skillPointsPerLevel = kDefaultSkillPointsPerLevel;
     inline float skillCap = kDefaultSkillCap;
 
-    // Skill menu UI layout (passed to SWF at runtime)
-    inline constexpr int kDefaultMenuPanelWidth = 820;
-    inline constexpr int kDefaultMenuPanelHeight = 0;
-    inline constexpr int kDefaultMenuPanelYOffset = -90;
-    inline constexpr int kDefaultMenuSkillRowGap = 36;
-    inline constexpr int kDefaultMenuSkillColumnGap = 22;
-    inline constexpr int kDefaultMenuSkillLabelValueGap = 4;
-    inline constexpr int kDefaultMenuSkillValueArrowGap = 2;
-    inline constexpr int kDefaultMenuSkillButtonTopGap = 18;
-    inline constexpr int kDefaultMenuSkillButtonRowOffset = 12;
-    inline constexpr int kDefaultMenuSkillButtonGap = 16;
-    inline constexpr int kDefaultMenuFontSize = 13;
-    inline constexpr int kDefaultMenuHeaderFontSize = 16;
-
-    inline int menuPanelWidth = kDefaultMenuPanelWidth;
-    inline int menuPanelHeight = kDefaultMenuPanelHeight;
-    inline int menuPanelYOffset = kDefaultMenuPanelYOffset;
-    inline int menuSkillRowGap = kDefaultMenuSkillRowGap;
-    inline int menuSkillColumnGap = kDefaultMenuSkillColumnGap;
-    inline int menuSkillLabelValueGap = kDefaultMenuSkillLabelValueGap;
-    inline int menuSkillValueArrowGap = kDefaultMenuSkillValueArrowGap;
-    inline int menuSkillButtonTopGap = kDefaultMenuSkillButtonTopGap;
-    inline int menuSkillButtonRowOffset = kDefaultMenuSkillButtonRowOffset;
-    inline int menuSkillButtonGap = kDefaultMenuSkillButtonGap;
-    inline int menuFontSize = kDefaultMenuFontSize;
-    inline int menuHeaderFontSize = kDefaultMenuHeaderFontSize;
-
     inline float GetReward(
         const std::unordered_map<std::string, float>& rewards,
         std::string_view                              key,
-        float                                         fallback)
+        float                                         builtInDefault)
     {
-        const auto it = rewards.find(std::string(key));
-        return it != rewards.end() ? it->second : fallback;
+        if (const auto it = rewards.find(std::string(key)); it != rewards.end()) {
+            return it->second;
+        }
+        const auto fallback = rewards.find("default");
+        return fallback != rewards.end() ? fallback->second : builtInDefault;
     }
 
     // -----------------------------------------------------------------------

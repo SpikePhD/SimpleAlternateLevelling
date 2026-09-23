@@ -2,7 +2,7 @@
 #include "Config.h"
 #include "SkillHook.h"
 #include "SkillMenu.h"
-#include "SettingsMenu.h"
+#include "SettingsPage.h"
 #include "SettingsModel.h"
 #include "EventSinks.h"
 #include "XPManager.h"
@@ -162,7 +162,6 @@ namespace {
         s_lifecycleGeneration.fetch_add(1);
         s_normalizeTaskQueued = false;
         EA::SkillMenu::ResetState();
-        EA::SettingsMenu::ResetState();
         EA::Leveling::ResetState();
     }
 
@@ -495,9 +494,8 @@ namespace {
         if (!EA::SkillMenu::Register()) {
             logger::warn("[EA] SkillMenu unavailable; vanilla level-up UI will remain active.");
         }
-        if (!EA::SettingsMenu::Register()) {
-            logger::warn("[EA] Settings: menu or input registration failed.");
-        }
+        // Optional: without SKSE Menu Framework, settings are edited in JSON.
+        EA::SettingsPage::Register();
 
         // Keep the engine's native formula synchronized with the validated
         // configuration. The explicit threshold refresh below adds the cap.

@@ -49,7 +49,7 @@ int main(int argc, char** argv)
     model.Begin();
     assert(model.Set(Index(model, "leveling.xp_base"), 30.0));
     assert(!model.Set(Index(model, "leveling.xp_base"), -1.0));
-    assert(!model.Set(Index(model, "skill_allocation.panel_height"), 200));
+    assert(!model.Set(Index(model, "skill_allocation.skill_cap"), 0.5));
     assert(model.Set(Index(model, "starting_skills.mode"), "uniform"));
     assert(model.Set(Index(model, "starting_skills.all_value"), 10));
     assert(model.Dirty());

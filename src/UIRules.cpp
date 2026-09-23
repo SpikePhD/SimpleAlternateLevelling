@@ -15,14 +15,6 @@ namespace EA::UIRules {
         return { static_cast<int>(candidate), false };
     }
 
-    IntegerValidation ValidatePanelHeight(double candidate, int defaultValue)
-    {
-        if (candidate == 0.0) {
-            return { 0, false };
-        }
-        return ValidateInteger(candidate, defaultValue, 300, 720);
-    }
-
     FloatValidation ValidateFloat(
         double candidate, float defaultValue, float minimum, float maximum)
     {
@@ -128,6 +120,28 @@ namespace EA::UIRules {
         _preview[skillIndex] = std::min(_cap, current + 1.0f);
         ++_deltas[skillIndex];
         --_remainingPoints;
+        return AllocationResult::kAllocated;
+    }
+
+    AllocationResult AllocationSession::Deallocate(std::size_t skillIndex)
+    {
+        if (_state != SessionState::kActive) {
+            return AllocationResult::kInvalidState;
+        }
+        if (skillIndex >= kSkillCount) {
+            return AllocationResult::kInvalidSkill;
+        }
+        if (_deltas[skillIndex] == 0) {
+            return AllocationResult::kNothingToRemove;
+        }
+
+        --_deltas[skillIndex];
+        ++_remainingPoints;
+        // Recompute from the snapshot so a fractional start (e.g. 199.5 capped
+        // to 200 by Allocate) returns exactly to its original value.
+        _preview[skillIndex] = _deltas[skillIndex] == 0
+            ? _snapshot[skillIndex]
+            : std::min(_cap, _snapshot[skillIndex] + static_cast<float>(_deltas[skillIndex]));
         return AllocationResult::kAllocated;
     }
 
