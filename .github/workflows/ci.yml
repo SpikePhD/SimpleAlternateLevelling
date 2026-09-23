@@ -24,7 +24,9 @@ jobs:
 
   windows-plugin:
     name: Windows plugin, tests, and package
-    runs-on: windows-latest
+    # CMakePresets.json uses the Visual Studio 17 2022 generator, matching the
+    # release toolchain. windows-latest now ships only Visual Studio 2026.
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
         with:
