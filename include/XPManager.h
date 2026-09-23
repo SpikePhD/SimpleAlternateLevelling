@@ -38,11 +38,6 @@ namespace EA::XPManager {
     // and overflow carry.
     void AwardXP(float amount, const AwardContext& context);
 
-    // Kill deduplication guard.
-    // Returns true if this is a new kill (XP should be awarded).
-    // Returns false if this FormID was already processed this session.
-    bool RegisterKill(RE::FormID actorID);
-
     // Book deduplication guard.
     // Returns true if this book has not yet been awarded XP this session.
     // Returns false if already processed (skip).

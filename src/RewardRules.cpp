@@ -51,6 +51,14 @@ namespace EA::RewardRules {
         return numItems > 0;
     }
 
+    bool ShouldRewardKill(
+        bool playerCredited,
+        bool victimIsPlayer,
+        bool victimCommandedByPlayer) noexcept
+    {
+        return playerCredited && !victimIsPlayer && !victimCommandedByPlayer;
+    }
+
     float CalculateKillReward(
         float baseXP,
         int enemyLevel,

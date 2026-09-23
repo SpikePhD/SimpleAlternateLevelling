@@ -331,20 +331,17 @@ namespace EA::EventSinks {
                 return RE::BSEventNotifyControl::kContinue;
 
             auto* killer = event->killer;
+            auto* dying = event->victim;
             const auto commander = killer->GetCommandingActor();
+            const auto victimCommander = dying->GetCommandingActor();
             const bool playerCredited = killer == player || commander.get() == player;
-            if (!playerCredited) {
-                logger::debug("[EA] Kill reward: killer '{}' is neither player nor player-commanded; skipped.",
-                    killer->GetName());
+            const bool victimIsPlayer = dying->IsPlayerRef();
+            const bool victimCommandedByPlayer = victimCommander.get() == player;
+            if (!RewardRules::ShouldRewardKill(playerCredited, victimIsPlayer, victimCommandedByPlayer)) {
+                logger::debug("[EA] Kill reward: '{}' killed by '{}' skipped (playerCredited={} victimIsPlayer={} playerMinion={}).",
+                    dying->GetName(), killer->GetName(), playerCredited, victimIsPlayer, victimCommandedByPlayer);
                 return RE::BSEventNotifyControl::kContinue;
             }
-
-            auto* dying = event->victim;
-            if (dying->IsPlayerRef())
-                return RE::BSEventNotifyControl::kContinue;
-
-            if (!XPManager::RegisterKill(dying->GetFormID()))
-                return RE::BSEventNotifyControl::kContinue;
 
             static auto* kwDragon   = RE::TESForm::LookupByEditorID<RE::BGSKeyword>("ActorTypeDragon");
             static auto* kwDaedra   = RE::TESForm::LookupByEditorID<RE::BGSKeyword>("ActorTypeDaedra");

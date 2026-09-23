@@ -48,6 +48,11 @@ namespace {
         Check(ShouldRewardPickpocket(1), "single item pickpocket awards");
         Check(ShouldRewardPickpocket(50), "stack still produces one eligible event");
         Check(!ShouldRewardPickpocket(0), "empty pickpocket event rejected");
+
+        Check(ShouldRewardKill(true, false, false), "player-credited kill awards");
+        Check(!ShouldRewardKill(false, false, false), "uncredited kill rejected");
+        Check(!ShouldRewardKill(true, true, false), "player death rejected");
+        Check(!ShouldRewardKill(true, false, true), "player's own minion rejected");
     }
 
     void TestKillRewards()

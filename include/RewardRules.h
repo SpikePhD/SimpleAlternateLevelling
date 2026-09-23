@@ -32,6 +32,14 @@ namespace EA::RewardRules {
 
     [[nodiscard]] bool ShouldRewardPickpocket(std::int32_t numItems) noexcept;
 
+    // ActorKill fires once per death, so respawned or resurrected actors are
+    // eligible again. The player's own summons, thralls, and reanimated
+    // corpses never award XP, which prevents reanimate-and-kill farming.
+    [[nodiscard]] bool ShouldRewardKill(
+        bool playerCredited,
+        bool victimIsPlayer,
+        bool victimCommandedByPlayer) noexcept;
+
     [[nodiscard]] float CalculateKillReward(
         float baseXP,
         int enemyLevel,

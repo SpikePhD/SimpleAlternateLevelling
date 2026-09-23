@@ -20,7 +20,6 @@ namespace EA::XPManager {
     // State
     // -----------------------------------------------------------------------
     static int                            s_pendingSkillPoints = 0;
-    static std::unordered_set<RE::FormID> s_deadActors;
     static std::unordered_set<RE::FormID> s_readBooks;
     static RewardRules::QuestLifecycle    s_questLifecycle;
     static std::unordered_set<std::uintptr_t> s_discoveredLocationMarkers;
@@ -80,18 +79,6 @@ namespace EA::XPManager {
     void SetPendingSkillPoints(int n) { s_pendingSkillPoints = n; }
 
     // -----------------------------------------------------------------------
-    // Kill guard
-    // -----------------------------------------------------------------------
-    bool RegisterKill(RE::FormID actorID) {
-        if (s_deadActors.contains(actorID)) {
-            logger::debug("[EA] Kill guard: FormID {:08X} already dead - skipped.", actorID);
-            return false;
-        }
-        s_deadActors.insert(actorID);
-        return true;
-    }
-
-    // -----------------------------------------------------------------------
     // Book guard
     // -----------------------------------------------------------------------
     bool RegisterBookRead(RE::FormID bookID) {
@@ -136,7 +123,6 @@ namespace EA::XPManager {
     }
 
     void ResetRewardGuards() {
-        s_deadActors.clear();
         s_readBooks.clear();
         s_questLifecycle.Reset();
         s_discoveredLocationMarkers.clear();

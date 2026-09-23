@@ -43,7 +43,7 @@ SKSEPluginLoad()
 |---|---|
 | `src/main.cpp` | Plugin entry, log init, cosave callbacks, kDataLoaded orchestration, CharCreateWatcher |
 | `src/Config.cpp` / `include/Config.h` | JSON loader; all XP values as `inline` globals |
-| `src/XPManager.cpp` / `include/XPManager.h` | `AwardXP()` (native XP bucket feed), kill/quest dedup guards, mod-owned pending points |
+| `src/XPManager.cpp` / `include/XPManager.h` | `AwardXP()` (native XP bucket feed), book/quest/location dedup guards, mod-owned pending points |
 | `src/Progression.cpp` / `include/Progression.h` | Pure curve validation/threshold calculation and versioned cosave codec |
 | `src/RewardRules.cpp` / `include/RewardRules.h` | Dependency-free reward eligibility, lifecycle, arithmetic, and marker/lock mappings |
 | `src/Leveling.cpp` / `include/Leveling.h` | Game-setting synchronization and finalized-level threshold refresh |
@@ -159,6 +159,10 @@ is collision-free. `IsRead()` is still false inside `Activate` before the origin
   tier is no longer a reliable source for the `"Locks Picked"` success event.
 - `QuestStatus::Event` is the quest reward authority. Completion awards once, while started
   and reset signals rearm repeatable quests.
+- `ActorKill::Event` fires once per death. Do not add a per-FormID kill guard: placed
+  references keep their FormID across cell respawns and `FF` IDs are recycled, so a
+  session-long guard silently drops XP. Kills of the player's own commanded actors
+  (summons, thralls, reanimated corpses) never award XP.
 - `QUEST_DATA::Type::kCompanions` does not exist. Use `kCompanionsQuest`.
 - `TESActorValueChangeEvent` and `TESPerkEntryRunEvent` have no struct definitions in this
   CommonLibSSE-NG build; those sinks are commented out.
