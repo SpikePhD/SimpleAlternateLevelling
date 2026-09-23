@@ -1,5 +1,11 @@
 {
-  "_comment": "Simple Alternate Levelling config. Edit values freely. Re-launch game to apply.",
+  "_comment": "Simple Alternate Levelling shipped defaults. In-game changes are written to SimpleAlternateLevelling.user.json.",
+  "config_version": 2,
+
+  "interface": {
+    "settings_hotkey": 68,
+    "_comment": "DirectInput keyboard scan code for opening SAL Settings; 68 is F10, 0 disables."
+  },
 
   "debug": {
     "verbose": true,
@@ -167,8 +173,19 @@
     "_comment_font": "font_size for skill names/levels; header_font_size for the points-remaining header."
   },
 
-  "reset_skills_on_new_game": false,
-  "_comment_reset_skills": "Set true to zero all 18 skills when a new game starts (applied after race selection, so race bonuses are also removed). Has no effect on loaded saves.",
+  "starting_skills": {
+    "mode": "vanilla",
+    "all_value": 0,
+    "custom": {
+      "one_handed": 0, "two_handed": 0, "block": 0,
+      "heavy_armor": 0, "light_armor": 0, "archery": 0,
+      "alteration": 0, "conjuration": 0, "destruction": 0,
+      "illusion": 0, "restoration": 0, "sneak": 0,
+      "smithing": 0, "alchemy": 0, "enchanting": 0,
+      "pickpocket": 0, "lockpicking": 0, "speech": 0
+    },
+    "_comment": "New characters only. mode: vanilla, zero, uniform (all_value), or custom (18 values)."
+  },
 
   "notifications": {
     "enabled": true,

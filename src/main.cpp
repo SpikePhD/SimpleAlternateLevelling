@@ -2,6 +2,8 @@
 #include "Config.h"
 #include "SkillHook.h"
 #include "SkillMenu.h"
+#include "SettingsMenu.h"
+#include "SettingsModel.h"
 #include "EventSinks.h"
 #include "XPManager.h"
 #include "Leveling.h"
@@ -47,20 +49,31 @@ namespace {
             if (!file.is_open()) return config;
             nlohmann::json j;
             file >> j;
-            if (!j.contains("debug") || !j["debug"].is_object()) {
-                return config;
+            auto applyDebug = [&](const nlohmann::json& source) {
+                if (!source.is_object() || !source.contains("debug") || !source["debug"].is_object()) return;
+                const auto& debug = source["debug"];
+                if (debug.contains("verbose") && debug["verbose"].is_boolean())
+                    config.verbose = debug["verbose"].get<bool>();
+                if (debug.contains("max_log_files") && debug["max_log_files"].is_number_integer()) {
+                    try {
+                        const auto raw = debug["max_log_files"].get<std::int64_t>();
+                        if (raw >= 0 && raw <= EA::LogPolicy::kMaximumMaxLogFiles)
+                            config.maxLogFiles = EA::LogPolicy::ValidateMaxLogFiles(raw);
+                    } catch (const nlohmann::json::exception&) {}
+                }
+            };
+            applyDebug(j);
+            std::ifstream userFile(GetPluginsDir() / "SimpleAlternateLevelling.user.json");
+            if (userFile) {
+                try {
+                    nlohmann::json user;
+                    userFile >> user;
+                    if (!user.contains("config_version") ||
+                        (user["config_version"].is_number_integer() &&
+                         user["config_version"] <= EA::SettingsModel::kSchemaVersion))
+                        applyDebug(user);
+                } catch (const nlohmann::json::exception&) {}
             }
-
-            const auto& debug = j["debug"];
-            if (debug.contains("verbose") && debug["verbose"].is_boolean()) {
-                config.verbose = debug["verbose"].get<bool>();
-            }
-
-            std::optional<std::int64_t> maxFiles;
-            if (debug.contains("max_log_files") && debug["max_log_files"].is_number_integer()) {
-                maxFiles = debug["max_log_files"].get<std::int64_t>();
-            }
-            config.maxLogFiles = EA::LogPolicy::ValidateMaxLogFiles(maxFiles);
         } catch (...) {}
         return config;
     }
@@ -138,6 +151,9 @@ namespace {
     // Persisted in cosave (v5). True after NormalizeSkills() has run for this
     // character. Prevents the normalization from re-running on every load.
     static bool s_skillsNormalized = false;
+    static EA::Config::StartingSkillsMode s_startingMode = EA::Config::StartingSkillsMode::Vanilla;
+    static float s_startingUniformValue = 0.0f;
+    static std::unordered_map<std::string, float> s_startingCustom;
     static bool s_normalizeTaskQueued = false;
     static bool s_charCreateWatcherRegistered = false;
     static bool s_dataLoadedHandled = false;
@@ -147,6 +163,7 @@ namespace {
         s_lifecycleGeneration.fetch_add(1);
         s_normalizeTaskQueued = false;
         EA::SkillMenu::ResetState();
+        EA::SettingsMenu::ResetState();
         EA::Leveling::ResetState();
     }
 
@@ -181,8 +198,32 @@ namespace {
         return skills;
     }
 
+    static std::string_view StartingSkillKey(RE::ActorValue av) {
+        switch (av) {
+            case RE::ActorValue::kOneHanded: return "one_handed";
+            case RE::ActorValue::kTwoHanded: return "two_handed";
+            case RE::ActorValue::kBlock: return "block";
+            case RE::ActorValue::kHeavyArmor: return "heavy_armor";
+            case RE::ActorValue::kLightArmor: return "light_armor";
+            case RE::ActorValue::kArchery: return "archery";
+            case RE::ActorValue::kAlteration: return "alteration";
+            case RE::ActorValue::kConjuration: return "conjuration";
+            case RE::ActorValue::kDestruction: return "destruction";
+            case RE::ActorValue::kIllusion: return "illusion";
+            case RE::ActorValue::kRestoration: return "restoration";
+            case RE::ActorValue::kSneak: return "sneak";
+            case RE::ActorValue::kSmithing: return "smithing";
+            case RE::ActorValue::kAlchemy: return "alchemy";
+            case RE::ActorValue::kEnchanting: return "enchanting";
+            case RE::ActorValue::kPickpocket: return "pickpocket";
+            case RE::ActorValue::kLockpicking: return "lockpicking";
+            case RE::ActorValue::kSpeech: return "speech";
+            default: return "";
+        }
+    }
+
     static void NormalizeSkills() {
-        if (!EA::Config::resetSkillsOnNewGame) return;
+        if (s_startingMode == EA::Config::StartingSkillsMode::Vanilla) return;
 
         auto* player = RE::PlayerCharacter::GetSingleton();
         if (!player) {
@@ -216,24 +257,28 @@ namespace {
                 continue;
             }
             logger::info("[EA]   skill '{}' ({}) = {:.1f}", name, static_cast<int>(av), current);
-            if (current != 0.0f) {
-                avo->SetBaseActorValue(av, current - current);
+            float desired = 0.0f;
+            if (s_startingMode == EA::Config::StartingSkillsMode::Uniform) desired = s_startingUniformValue;
+            if (s_startingMode == EA::Config::StartingSkillsMode::Custom) {
+                const auto found = s_startingCustom.find(std::string(StartingSkillKey(av)));
+                if (found != s_startingCustom.end()) desired = found->second;
             }
+            if (current != desired) avo->SetBaseActorValue(av, desired);
 
             float residual = avo->GetActorValue(av);
-            if (std::isfinite(residual) && residual != 0.0f) {
-                avo->ModActorValue(RE::ACTOR_VALUE_MODIFIER::kTemporary, av, -residual);
+            if (std::isfinite(residual) && residual != desired) {
+                avo->ModActorValue(RE::ACTOR_VALUE_MODIFIER::kTemporary, av, desired - residual);
             } else if (!std::isfinite(residual)) {
                 logger::warn("[EA] NormalizeSkills: skipped invalid residual for '{}' ({}).",
                     name, static_cast<int>(av));
             }
         }
         s_skillsNormalized = true;
-        logger::info("[EA] NormalizeSkills: all discovered skills set to 0 (one-time reset done).");
+        logger::info("[EA] Starting skills applied once (mode={}).", static_cast<int>(s_startingMode));
     }
 
     static void QueueNormalizeSkillsWhenReady() {
-        if (!EA::Config::resetSkillsOnNewGame || !s_awaitingCharCreate || s_skillsNormalized || s_normalizeTaskQueued) {
+        if (s_startingMode == EA::Config::StartingSkillsMode::Vanilla || !s_awaitingCharCreate || s_skillsNormalized || s_normalizeTaskQueued) {
             return;
         }
 
@@ -251,7 +296,7 @@ namespace {
             }
             s_normalizeTaskQueued = false;
 
-            if (!EA::Config::resetSkillsOnNewGame || !s_awaitingCharCreate || s_skillsNormalized) {
+            if (s_startingMode == EA::Config::StartingSkillsMode::Vanilla || !s_awaitingCharCreate || s_skillsNormalized) {
                 return;
             }
 
@@ -275,7 +320,7 @@ namespace {
             const RE::MenuOpenCloseEvent*              event,
             RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
         {
-            if (!EA::Config::resetSkillsOnNewGame) return RE::BSEventNotifyControl::kContinue;
+            if (s_startingMode == EA::Config::StartingSkillsMode::Vanilla) return RE::BSEventNotifyControl::kContinue;
             if (!event) return RE::BSEventNotifyControl::kContinue;
 
             // Support both vanilla ("RaceSex Menu") and modded ("RaceMenu") installs.
@@ -451,6 +496,9 @@ namespace {
         if (!EA::SkillMenu::Register()) {
             logger::warn("[EA] SkillMenu unavailable; vanilla level-up UI will remain active.");
         }
+        if (!EA::SettingsMenu::Register()) {
+            logger::warn("[EA] Settings: menu or input registration failed.");
+        }
 
         // Keep the engine's native formula synchronized with the validated
         // configuration. The explicit threshold refresh below adds the cap.
@@ -525,6 +573,9 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse) {
             s_awaitingCharCreate = true;
             s_skillsNormalized   = false;
             s_normalizeTaskQueued = false;
+            s_startingMode = EA::Config::startingSkillsMode;
+            s_startingUniformValue = EA::Config::startingSkillsUniformValue;
+            s_startingCustom = EA::Config::startingSkillsCustom;
             logger::info("[EA] kNewGame: awaiting RaceMenu close to normalize skills.");
             EA::Leveling::QueueThresholdRefresh(1, "new-game");
             QueueNormalizeSkillsWhenReady();

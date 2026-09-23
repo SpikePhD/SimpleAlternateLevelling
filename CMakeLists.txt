@@ -6,7 +6,7 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 
 project(
     SimpleAlternateLevelling
-    VERSION 0.1.0
+    VERSION 0.2.0
     LANGUAGES CXX
 )
 
@@ -80,10 +80,30 @@ if(SAL_BUILD_PLUGIN)
         COMMENT "Verifying EA_SkillMenu.swf against tracked ActionScript"
         VERBATIM
     )
+    set(SAL_SETTINGS_SWF_TOOL_ARGS
+        --java "${SAL_JAVA_EXECUTABLE}"
+        --ffdec-jar "${SAL_FFDEC_JAR}"
+        --swf "${CMAKE_CURRENT_SOURCE_DIR}/data/Interface/SAL_SettingsMenu.swf"
+        --scripts "${CMAKE_CURRENT_SOURCE_DIR}/assets/settings_swf_src/scripts"
+        --work-dir "${CMAKE_CURRENT_BINARY_DIR}/settings_swf"
+    )
+    add_custom_target(rebuild_settings_menu
+        COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/skill_menu_swf.py"
+            rebuild ${SAL_SETTINGS_SWF_TOOL_ARGS}
+        COMMENT "Rebuilding SAL_SettingsMenu.swf with FFDec 25.1.3"
+        VERBATIM
+    )
+    add_custom_target(verify_settings_menu
+        COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/skill_menu_swf.py"
+            verify ${SAL_SETTINGS_SWF_TOOL_ARGS}
+        COMMENT "Verifying SAL_SettingsMenu.swf against tracked ActionScript"
+        VERBATIM
+    )
 
     set(SAL_PLUGIN_SOURCES
         src/main.cpp
         src/Config.cpp
+        src/SettingsModel.cpp
         src/XPManager.cpp
         src/Progression.cpp
         src/RewardRules.cpp
@@ -92,6 +112,7 @@ if(SAL_BUILD_PLUGIN)
         src/Leveling.cpp
         src/SkillHook.cpp
         src/SkillMenu.cpp
+        src/SettingsMenu.cpp
         src/EventSinks.cpp
     )
 
@@ -156,6 +177,9 @@ if(SAL_BUILD_PLUGIN)
                 "${CMAKE_CURRENT_SOURCE_DIR}/data/Interface/EA_SkillMenu.swf"
                 "${SAL_DEPLOY_DIR}/Interface/EA_SkillMenu.swf"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/data/Interface/SAL_SettingsMenu.swf"
+                "${SAL_DEPLOY_DIR}/Interface/SAL_SettingsMenu.swf"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${CMAKE_CURRENT_SOURCE_DIR}/data/Interface/Translations/SimpleAlternateLevelling_ENGLISH.txt"
                 "${SAL_DEPLOY_DIR}/Interface/Translations/SimpleAlternateLevelling_ENGLISH.txt"
             COMMENT "Deploying plugin files to ${SAL_DEPLOY_DIR}"
@@ -170,6 +194,7 @@ if(SAL_BUILD_PLUGIN)
             --dll $<TARGET_FILE:${PROJECT_NAME}>
             --config "${CMAKE_CURRENT_SOURCE_DIR}/data/SKSE/Plugins/${PROJECT_NAME}.json"
             --swf "${CMAKE_CURRENT_SOURCE_DIR}/data/Interface/EA_SkillMenu.swf"
+            --settings-swf "${CMAKE_CURRENT_SOURCE_DIR}/data/Interface/SAL_SettingsMenu.swf"
             --translation "${CMAKE_CURRENT_SOURCE_DIR}/data/Interface/Translations/SimpleAlternateLevelling_ENGLISH.txt"
             --output-dir "${SAL_PACKAGE_DIR}"
             --version "${PROJECT_VERSION}"
@@ -221,5 +246,18 @@ if(BUILD_TESTS)
             --native "${CMAKE_CURRENT_SOURCE_DIR}/src/SkillMenu.cpp"
             --actionscript "${CMAKE_CURRENT_SOURCE_DIR}/assets/swf_src/scripts/frame_1/DoAction.as"
             --translation "${CMAKE_CURRENT_SOURCE_DIR}/data/Interface/Translations/SimpleAlternateLevelling_ENGLISH.txt"
-            --swf "${CMAKE_CURRENT_SOURCE_DIR}/data/Interface/EA_SkillMenu.swf")
+            --swf "${CMAKE_CURRENT_SOURCE_DIR}/data/Interface/EA_SkillMenu.swf"
+            --settings-native "${CMAKE_CURRENT_SOURCE_DIR}/src/SettingsMenu.cpp"
+            --settings-actionscript "${CMAKE_CURRENT_SOURCE_DIR}/assets/settings_swf_src/scripts/frame_1/DoAction.as"
+            --settings-swf "${CMAKE_CURRENT_SOURCE_DIR}/data/Interface/SAL_SettingsMenu.swf"
+            --defaults "${CMAKE_CURRENT_SOURCE_DIR}/data/SKSE/Plugins/${PROJECT_NAME}.json")
+    if(SAL_BUILD_PLUGIN)
+        add_executable(SimpleAlternateLevellingSettingsTests
+            tests/SettingsModelTests.cpp src/SettingsModel.cpp src/Progression.cpp)
+        target_compile_features(SimpleAlternateLevellingSettingsTests PRIVATE cxx_std_23)
+        target_include_directories(SimpleAlternateLevellingSettingsTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+        target_link_libraries(SimpleAlternateLevellingSettingsTests PRIVATE nlohmann_json::nlohmann_json)
+        add_test(NAME settings_model COMMAND SimpleAlternateLevellingSettingsTests
+            "${CMAKE_CURRENT_SOURCE_DIR}/data/SKSE/Plugins/${PROJECT_NAME}.json")
+    endif()
 endif()

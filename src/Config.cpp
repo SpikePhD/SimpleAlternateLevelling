@@ -3,6 +3,7 @@
 #include "Progression.h"
 #include "LogPolicy.h"
 #include "UIRules.h"
+#include "SettingsModel.h"
 
 #include <nlohmann/json.hpp>
 #include <cmath>
@@ -13,6 +14,9 @@
 namespace EA::Config {
 
     using json = nlohmann::json;
+    static EA::SettingsModel s_settings;
+
+    EA::SettingsModel& Settings() { return s_settings; }
 
     // Resolve the path to the config JSON from the physical location of our DLL.
     // REX::W32::GetCurrentModule() returns &__ImageBase (our DLL's own base address),
@@ -149,7 +153,7 @@ namespace EA::Config {
     }
 
     void Load() {
-        auto configPath = ResolveConfigPath();
+        const auto configPath = ResolveConfigPath();
 
         if (!std::filesystem::exists(configPath)) {
             logger::warn("[EA] Config: File not found at '{}'. Using all defaults.",
@@ -164,14 +168,45 @@ namespace EA::Config {
             return;
         }
 
-        json j;
+        json shipped;
         try {
-            file >> j;
+            file >> shipped;
         } catch (const json::exception& e) {
             logger::error("[EA] Config: JSON error in '{}': {}. Using all defaults.",
                           configPath.string(), e.what());
             return;
         }
+
+        json user = json::object();
+        const auto userPath = configPath.parent_path() / "SimpleAlternateLevelling.user.json";
+        if (std::ifstream overrideFile(userPath); overrideFile.is_open()) {
+            try {
+                overrideFile >> user;
+            } catch (const json::exception& e) {
+                logger::warn("[EA] Config: invalid user override '{}': {}; using shipped defaults.",
+                    userPath.string(), e.what());
+                user = json::object();
+            }
+        }
+        std::string warning;
+        try {
+            if (!s_settings.Load(std::move(shipped), std::move(user), &warning)) {
+                logger::error("[EA] Config: shipped defaults are not a JSON object.");
+                return;
+            }
+        } catch (const json::exception& e) {
+            logger::error("[EA] Config: settings validation failed: {}.", e.what());
+            return;
+        }
+        if (!warning.empty()) logger::warn("[EA] Config: {}.", warning);
+        logger::info("[EA] Config: layered defaults '{}' and user overrides '{}'.",
+            configPath.string(), userPath.string());
+        ApplyEffective();
+    }
+
+    void ApplyEffective() {
+        const auto configPath = ResolveConfigPath();
+        const auto& j = s_settings.Effective();
 
         // Debug
         verbose     = ReadBool(j,  {"debug", "verbose"},       verbose);
@@ -355,8 +390,22 @@ namespace EA::Config {
         menuFontSize = readInteger("font_size", kDefaultMenuFontSize, 8, 40);
         menuHeaderFontSize = readInteger("header_font_size", kDefaultMenuHeaderFontSize, 10, 48);
 
-        // New game
-        resetSkillsOnNewGame = ReadBool(j, {"reset_skills_on_new_game"}, resetSkillsOnNewGame);
+        // Starting skills are only consulted for the next new character.
+        const auto mode = ReadString(j, { "starting_skills", "mode" }, "vanilla");
+        startingSkillsMode = mode == "zero" ? StartingSkillsMode::Zero :
+            mode == "uniform" ? StartingSkillsMode::Uniform :
+            mode == "custom" ? StartingSkillsMode::Custom : StartingSkillsMode::Vanilla;
+        startingSkillsUniformValue = ReadFloat(j, { "starting_skills", "all_value" }, 0.0f);
+        startingSkillsCustom.clear();
+        if (j.contains("starting_skills") && j["starting_skills"].is_object() &&
+            j["starting_skills"].contains("custom") && j["starting_skills"]["custom"].is_object()) {
+            for (auto it = j["starting_skills"]["custom"].begin(); it != j["starting_skills"]["custom"].end(); ++it) {
+                startingSkillsCustom[it.key()] = ReadFloat(j, { "starting_skills", "custom", it.key() }, 0.0f);
+            }
+        }
+        const auto rawHotkey = ReadNumber(j, { "interface", "settings_hotkey" }, 0x44);
+        settingsHotkey = rawHotkey.invalid || !EA::SettingsModel::ValidHotkey(rawHotkey.value)
+            ? 0x44 : static_cast<int>(rawHotkey.value);
 
         // Notifications
         notificationsEnabled = ReadBool(j, {"notifications", "enabled"}, notificationsEnabled);
@@ -382,6 +431,7 @@ namespace EA::Config {
         loadMsg("quest_civil_war",     "For Skyrim");
         loadMsg("quest_dawnguard",     "The night shifts");
         loadMsg("quest_dragonborn",    "A new chapter");
+        loadMsg("quest_dlc",           "A new chapter");
         loadMsg("quest_objectives",    "Objective complete");
         loadMsg("quest_other",         "Quest complete");
         loadMsg("location_discovered", "A new place discovered");
@@ -419,7 +469,7 @@ namespace EA::Config {
         logger::info("[EA] Config: Skill cap - {:.1f}", skillCap);
         logger::info("[EA] Config: max_log_files={}", maxLogFiles);
         logger::info("[EA] Config: notifications_enabled={}", notificationsEnabled);
-        logger::info("[EA] Config: reset_skills_on_new_game={}", resetSkillsOnNewGame);
+        logger::info("[EA] Config: starting_skills.mode={}, settings_hotkey={}", mode, settingsHotkey);
 
         // Dump the raw JSON only for explicitly verbose diagnostic sessions.
         if (verbose) {
@@ -437,5 +487,35 @@ namespace EA::Config {
                 logger::warn("[EA] Config: Could not dump JSON contents to log.");
             }
         }
+    }
+
+    bool SaveDraftAndApply(std::string& error)
+    {
+        const auto userPath = ResolveConfigPath().parent_path() / "SimpleAlternateLevelling.user.json";
+        const auto overrides = s_settings.Overrides();
+        std::error_code ec;
+        if (overrides.size() == 1) {
+            std::filesystem::remove(userPath, ec);
+            if (ec) { error = ec.message(); return false; }
+        } else {
+            const auto temporary = userPath.wstring() + L".tmp";
+            {
+                std::ofstream file(std::filesystem::path(temporary), std::ios::binary | std::ios::trunc);
+                if (!file) { error = "could not create user config"; return false; }
+                file << overrides.dump(2) << '\n';
+                file.flush();
+                if (!file) { error = "could not write user config"; return false; }
+            }
+            if (!::MoveFileExW(temporary.c_str(), userPath.c_str(),
+                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+                error = "could not replace user config (Windows error " + std::to_string(::GetLastError()) + ")";
+                std::filesystem::remove(std::filesystem::path(temporary), ec);
+                return false;
+            }
+        }
+        s_settings.Accept();
+        ApplyEffective();
+        spdlog::set_level(verbose ? spdlog::level::trace : spdlog::level::info);
+        return true;
     }
 }

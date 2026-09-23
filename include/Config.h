@@ -4,6 +4,8 @@
 #include <string_view>
 #include <unordered_map>
 
+namespace EA { class SettingsModel; }
+
 namespace EA::Config {
 
     // -----------------------------------------------------------------------
@@ -15,8 +17,12 @@ namespace EA::Config {
     inline bool verbose     = false;
     inline int  maxLogFiles = 10;
 
-    // New game
-    inline bool resetSkillsOnNewGame = false;
+    // Applied once to a new character after RaceMenu closes.
+    enum class StartingSkillsMode { Vanilla, Zero, Uniform, Custom };
+    inline StartingSkillsMode startingSkillsMode = StartingSkillsMode::Vanilla;
+    inline float startingSkillsUniformValue = 0.0f;
+    inline std::unordered_map<std::string, float> startingSkillsCustom{};
+    inline int settingsHotkey = 0x44; // F10 DirectInput scan code
 
     // Notifications
     inline bool notificationsEnabled = true;
@@ -129,4 +135,7 @@ namespace EA::Config {
     // Missing keys fall back to the inline defaults above.
     // -----------------------------------------------------------------------
     void Load();
+    void ApplyEffective();
+    [[nodiscard]] EA::SettingsModel& Settings();
+    [[nodiscard]] bool SaveDraftAndApply(std::string& error);
 }

@@ -50,9 +50,12 @@ SKSEPluginLoad()
 | `src/UIRules.cpp` / `include/UIRules.h` | Dependency-free UI validation and transactional allocation session rules |
 | `src/SkillHook.cpp` / `include/SkillHook.h` | `write_branch<5>` hooks: AddSkillExperience (discard), TESObjectBOOK::Activate (book XP) |
 | `src/SkillMenu.cpp` / `include/SkillMenu.h` | Validated Scaleform boundary, menu lifecycle, preview/commit transaction, vanilla continuation |
+| `src/SettingsModel.cpp` / `include/SettingsModel.h` | Defaults-driven setting registry, bounds, layering, migration, presets, draft transaction, overrides |
+| `src/SettingsMenu.cpp` / `include/SettingsMenu.h` | Separate F10 native Scaleform menu, input sink, validated callbacks, atomic Apply/Cancel |
 | `src/EventSinks.cpp` / `include/EventSinks.h` | All BSTEventSink structs + `Register()` |
 | `include/PCH.h` | Precompiled header: RE/Skyrim.h, SKSE, spdlog sinks, std includes |
 | `data/SKSE/Plugins/SimpleAlternateLevelling.json` | Runtime config (XP values, leveling curve, debug flags) |
+| `data/SKSE/Plugins/SimpleAlternateLevelling.user.json` | Optional menu-written overrides (untracked runtime file) |
 
 ### Skill allocation flow
 
@@ -70,6 +73,22 @@ The menu state machine is `Idle -> Opening -> Active -> Committing -> Closing`.
 Every Scaleform callback must originate from the active movie, have the exact argument
 shape, and identify one of the 18 whitelisted skills. Load, revert, and new-game paths
 invalidate all deferred menu, normalization, reward, and threshold work.
+
+### Settings menu
+
+F10 (DirectInput scan code 68, configurable as `interface.settings_hotkey`, 0 to
+disable) opens `SAL_SettingsMenu.swf` via the normal SKSE input sink and UI
+message queue. It is a separate paused/modal IMenu. The shipped JSON defines
+the numeric/Boolean registry and defaults; `SimpleAlternateLevelling.user.json`
+contains only validated overrides and schema version 2. Legacy
+`reset_skills_on_new_game` migrates to `starting_skills.mode` (`zero`/`vanilla`).
+The draft supports Apply, Cancel, section/all reset, and presets. Apply writes
+the user file atomically, projects the effective config to existing globals,
+and refreshes the native threshold without assigning `PlayerSkills::xp`.
+Custom notification text stays JSON-only. Starting-skill mode and values are
+snapshotted on `kNewGame`, so later changes cannot alter existing characters.
+Skill points per level apply only to future level-ups. Keep all visible menu
+text in the translation file.
 
 ### XP flow
 
@@ -180,10 +199,13 @@ deployment during plugin builds, use an ignored `CMakeUserPresets.json` to set
 `SAL_DEPLOY_DIR`; never add local absolute paths to tracked CMake files or documentation.
 The deprecated `SKYRIM_PATH` cache variable is accepted only as a compatibility alias.
 
-The committed `data/Interface/EA_SkillMenu.swf` is rebuilt explicitly from
-`assets/swf_src/scripts/frame_1/DoAction.as` with Java 17 and FFDec 25.1.3. Set
-`SAL_JAVA_EXECUTABLE` and `SAL_FFDEC_JAR`, then use the `rebuild_skill_menu` and
-`verify_skill_menu` targets. Normal plugin builds do not require the SWF toolchain.
+The committed `data/Interface/EA_SkillMenu.swf` and
+`data/Interface/SAL_SettingsMenu.swf` are rebuilt explicitly from their
+respective `assets/swf_src/scripts/frame_1/DoAction.as` and
+`assets/settings_swf_src/scripts/frame_1/DoAction.as` with Java 17 and FFDec
+25.1.3. Set `SAL_JAVA_EXECUTABLE` and `SAL_FFDEC_JAR`, then use the
+`rebuild_skill_menu`, `verify_skill_menu`, `rebuild_settings_menu`, and
+`verify_settings_menu` targets. Normal plugin builds do not require FFDec.
 
 Build artifacts are under `out/build/<preset>/`. Runtime logs are written directly to the
 standard SKSE log directory. `debug.max_log_files=0` disables deletion; valid limits are

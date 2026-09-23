@@ -68,7 +68,7 @@ ctest --preset portable-tests
 
 Keep machine-specific paths in an ignored `CMakeUserPresets.json`. Inherit from
 `windows-release-tests` and set `SAL_DEPLOY_DIR` to the root of an MO2 mod. When
-that value is present, successful plugin builds copy the DLL, JSON, SWF, and
+that value is present, successful plugin builds copy the DLL, JSON, both SWFs, and
 translation file into the correct mod directory structure.
 
 `SKYRIM_PATH` remains a deprecated compatibility alias for `SAL_DEPLOY_DIR`.
@@ -85,6 +85,7 @@ mod manager. The archive contains exactly these Data-relative paths:
 
 ```text
 Interface/EA_SkillMenu.swf
+Interface/SAL_SettingsMenu.swf
 Interface/Translations/SimpleAlternateLevelling_ENGLISH.txt
 SKSE/Plugins/SimpleAlternateLevelling.dll
 SKSE/Plugins/SimpleAlternateLevelling.json
@@ -102,7 +103,39 @@ selection, `R` resets, and `C` confirms. Controller navigation is not supported.
 
 UI strings use Skyrim translation files. Additional languages can provide
 `Interface/Translations/SimpleAlternateLevelling_<LANGUAGE>.txt` with the same
-three `$SAL_*` keys as the English file.
+`$SAL_*` keys as the English file.
+
+## In-game settings
+
+Press **F10** during gameplay to open the separate SAL Settings menu. The
+hotkey is the DirectInput keyboard scan code in `interface.settings_hotkey`
+(default `68`, F10; `0` disables it). The menu requires no SkyUI, MCM, Papyrus,
+or plugin file. It uses the mouse for sections, presets, toggles, and numeric
+editing. Enter commits a focused numeric field. Escape cancels the draft.
+
+Sections cover the XP threshold curve, quest and kill rewards, exploration,
+locks, books, pickpocketing, starting skills, skill allocation, notifications,
+interface layout, and debug settings. Every numeric or Boolean setting in the
+shipped JSON is available. Notification message text remains editable in JSON.
+Use **Apply** to save, **Cancel** to discard, **Reset Section** to restore one
+section's shipped values, or **Reset All** to restore every shipped value.
+Presets include SAL Default, Faster/Slower Progression, Vanilla-ish Curve,
+Zero-Skill Start, and Custom Skill Start. Presets change the draft until Apply.
+
+Starting skills can stay vanilla, begin at zero, begin at one chosen value, or
+use separate values for all 18 skills. This choice is captured at new-character
+creation; changing it does not alter an existing character. Skill points per
+level affect future awards only. Changing the XP curve updates the live level
+threshold without changing accumulated native XP.
+
+`SimpleAlternateLevelling.json` is the shipped default configuration. Menu
+changes are written atomically to `SimpleAlternateLevelling.user.json` beside
+it, with only values that differ from the defaults. The effective config is the
+defaults plus those overrides. Deleting the user file restores defaults on the
+next launch. Legacy `reset_skills_on_new_game=true` migrates to zero-skill
+start, while `false` migrates to vanilla. Unknown or invalid user values are
+ignored individually; a future schema version is ignored safely. Custom
+notification strings may still be edited in either JSON file.
 
 ### Rebuild the Scaleform menu
 
@@ -114,14 +147,19 @@ FFDec 25.1.3 jar, then run:
 ```powershell
 cmake --build --preset windows-release-tests --target rebuild_skill_menu
 cmake --build --preset windows-release-tests --target verify_skill_menu
+cmake --build --preset windows-release-tests --target rebuild_settings_menu
+cmake --build --preset windows-release-tests --target verify_settings_menu
 ```
 
 The official `ffdec_25.1.3.zip` SHA-256 is
 `0b39cd56d1365f161059fff2b7055ea90446782fd1c452a2ce62ab22d66a1e4e`.
+When adding a setting key, regenerate the English translation file with
+`python tools/generate_settings_translation.py`, then review its labels.
 
 ## Runtime files
 
 - Configuration: `Data/SKSE/Plugins/SimpleAlternateLevelling.json`
+- User overrides: `Data/SKSE/Plugins/SimpleAlternateLevelling.user.json`
 - Logs: the standard SKSE log directory as
   `SimpleAlternateLevelling_<timestamp>.log`
 

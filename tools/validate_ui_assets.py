@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 import struct
 import zlib
@@ -15,6 +16,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--actionscript", required=True, type=Path)
     parser.add_argument("--translation", required=True, type=Path)
     parser.add_argument("--swf", required=True, type=Path)
+    parser.add_argument("--settings-native", required=True, type=Path)
+    parser.add_argument("--settings-actionscript", required=True, type=Path)
+    parser.add_argument("--settings-swf", required=True, type=Path)
+    parser.add_argument("--defaults", required=True, type=Path)
     return parser.parse_args()
 
 
@@ -84,6 +89,36 @@ def main() -> int:
         raise RuntimeError("Skill menu SWF has a static main-stage object; the panel must be drawn by EA_Init only.")
     if not any(tag == 12 and b"EA_Init" in payload for tag, payload in tags):
         raise RuntimeError("Skill menu SWF is missing the EA_Init frame script.")
+    settings_native = args.settings_native.read_text(encoding="utf-8")
+    settings_script = args.settings_actionscript.read_text(encoding="utf-8")
+    for token in ("SAL_Init", "SAL_Update", "SAL_Error", "SAL_OnSet", "SAL_OnApply",
+                  "SAL_OnCancel", "SAL_OnResetSection", "SAL_OnResetAll", "SAL_OnPreset"):
+        require(settings_native, token, args.settings_native)
+        require(settings_script, token, args.settings_actionscript)
+    for token in ("args.GetMovie() != s_movie", "args.GetArgCount() != count",
+                  "std::isfinite(rawIndex)", "rawIndex >= static_cast<double>(descriptors.size())"):
+        require(settings_native, token, args.settings_native)
+    settings_tags = list(root_tags(args.settings_swf))
+    if any(tag in (4, 26, 70) for tag, _ in settings_tags):
+        raise RuntimeError("Settings SWF has an unexpected static main-stage object.")
+    if not any(tag == 12 and b"SAL_Init" in payload for tag, payload in settings_tags):
+        raise RuntimeError("Settings SWF is missing its SAL_Init frame script.")
+    translated = {line.split("\t", 1)[0] for line in translation.splitlines() if "\t" in line}
+    defaults = json.loads(args.defaults.read_text(encoding="utf-8"))
+    def walk(node: dict, prefix: str = ""):
+        for key, value in node.items():
+            if key.startswith("_") or key == "config_version":
+                continue
+            path = f"{prefix}.{key}" if prefix else key
+            if path == "notifications.messages":
+                continue
+            if isinstance(value, dict):
+                yield from walk(value, path)
+            elif isinstance(value, (int, float, bool)) or path == "starting_skills.mode":
+                yield "$SAL_SETTING_" + path.replace(".", "_").upper()
+    missing = set(walk(defaults)) - translated
+    if missing:
+        raise RuntimeError(f"Settings translation keys missing: {sorted(missing)}")
     return 0
 
 

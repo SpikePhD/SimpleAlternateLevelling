@@ -52,7 +52,7 @@ def main() -> int:
         )
 
     args.work_dir.mkdir(parents=True, exist_ok=True)
-    rebuilt = args.work_dir / "EA_SkillMenu.rebuilt.swf"
+    rebuilt = args.work_dir / f"{args.swf.stem}.rebuilt.swf"
     rebuilt.unlink(missing_ok=True)
     run(base + ["-importScript", str(args.swf), str(rebuilt), str(args.scripts)])
     if not rebuilt.is_file() or rebuilt.stat().st_size == 0:
