@@ -79,7 +79,7 @@ def main() -> int:
         require(actionscript, token, args.actionscript)
     require(native, "std::array<RE::GFxValue, 7>", args.native)
     for key in ("$SAL_SKILL_POINTS_LABEL", "$SAL_CONFIRM", "$SAL_RESET", "$SAL_ALLOC_LEVEL",
-                "$SAL_ALLOC_REMAINING", "$SAL_ALLOC_CARRIED", "$SAL_ALLOC_MAX", "$SAL_GROUP_COMBAT",
+                "$SAL_ALLOC_REMAINING", "$SAL_ALLOC_CARRIED", "$SAL_ALLOC_BONUS", "$SAL_ALLOC_MAX", "$SAL_GROUP_COMBAT",
                 "$SAL_GROUP_MAGIC", "$SAL_GROUP_STEALTH", "$SAL_ALLOC_HINT"):
         require(native, key, args.native)
         require(translation, key + "\t", args.translation)

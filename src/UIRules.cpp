@@ -37,6 +37,17 @@ namespace EA::UIRules {
         return static_cast<int>(total);
     }
 
+    BonusValidation ClampSkillPointBonus(std::int32_t raw) noexcept
+    {
+        if (raw < 0) {
+            return { 0, true, false };
+        }
+        if (raw > kMaxSkillPointBonus) {
+            return { kMaxSkillPointBonus, false, true };
+        }
+        return { static_cast<int>(raw), false, false };
+    }
+
     std::optional<int> ParseIntegralIdentifier(double value)
     {
         if (!std::isfinite(value) || std::trunc(value) != value ||
@@ -252,6 +263,7 @@ namespace EA::UIRules {
     FlowAction LevelUpFlow::Begin(bool preStepRegistered, bool preStepWants) noexcept
     {
         _handoff.Reset();
+        _bonusTaken = false;
         if (_handoff.Begin(preStepRegistered, preStepWants) == HandoffDecision::kAwaitStep) {
             _stage = LevelUpStage::kPreStep;
             return FlowAction::kAwaitStep;
@@ -291,10 +303,20 @@ namespace EA::UIRules {
         return _handoff.ObserveSample(gamePaused, nowSeconds, graceSeconds);
     }
 
+    bool LevelUpFlow::TakeBonusCall() noexcept
+    {
+        if (_bonusTaken || _stage != LevelUpStage::kSkillMenu) {
+            return false;
+        }
+        _bonusTaken = true;
+        return true;
+    }
+
     void LevelUpFlow::Reset() noexcept
     {
         _stage = LevelUpStage::kIdle;
         _handoff.Reset();
+        _bonusTaken = false;
     }
 
     void CharacterCreatedSignal::Arm() noexcept

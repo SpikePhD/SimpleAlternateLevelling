@@ -32,6 +32,16 @@ namespace EA::UIRules {
     [[nodiscard]] FloatValidation ValidateFloat(
         double candidate, float defaultValue, float minimum, float maximum);
     [[nodiscard]] std::optional<int> CheckedPointTotal(int pendingPoints, int grant);
+
+    // Integration skill point bonus for one level-up: negative values count
+    // as 0 and values above kMaxSkillPointBonus are clamped.
+    inline constexpr int kMaxSkillPointBonus = 1000;
+    struct BonusValidation {
+        int  value;
+        bool negative;
+        bool clamped;
+    };
+    [[nodiscard]] BonusValidation ClampSkillPointBonus(std::int32_t raw) noexcept;
     [[nodiscard]] std::optional<int> ParseIntegralIdentifier(double value);
     [[nodiscard]] std::optional<std::size_t> FindWhitelistedIdentifier(
         int value, std::span<const int> whitelist);
@@ -160,6 +170,10 @@ namespace EA::UIRules {
         // Fail-safe sample; true when the caller should Continue().
         [[nodiscard]] bool ObserveSample(bool gamePaused, double nowSeconds,
             double graceSeconds = LevelUpHandoff::kDefaultGraceSeconds) noexcept;
+        // True exactly once per Begin(), and only once the pre-step is over
+        // (stage kSkillMenu): the integration skill point bonus is requested
+        // once per intercepted level-up, never for stray or re-opened menus.
+        [[nodiscard]] bool TakeBonusCall() noexcept;
         void Reset() noexcept;
 
         [[nodiscard]] LevelUpStage Stage() const noexcept { return _stage; }
@@ -168,6 +182,7 @@ namespace EA::UIRules {
     private:
         LevelUpStage   _stage{ LevelUpStage::kIdle };
         LevelUpHandoff _handoff;
+        bool           _bonusTaken{ false };
     };
 
     // Fires the integration character-created callback once per new game,

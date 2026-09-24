@@ -20,6 +20,7 @@ FIXED = {
     "$SAL_ALLOC_LEVEL": "Level",
     "$SAL_ALLOC_REMAINING": "points remaining",
     "$SAL_ALLOC_CARRIED": "carried over from earlier levels",
+    "$SAL_ALLOC_BONUS": "bonus from other mods",
     "$SAL_ALLOC_MAX": "Max",
     "$SAL_GROUP_COMBAT": "Combat",
     "$SAL_GROUP_MAGIC": "Magic",

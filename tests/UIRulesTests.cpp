@@ -223,6 +223,55 @@ int main()
     assert(!flow.Waiting());
     flow.Reset();
 
+    // Skill point bonus values.
+    assert(ClampSkillPointBonus(0).value == 0);
+    assert(ClampSkillPointBonus(3).value == 3 && !ClampSkillPointBonus(3).clamped);
+    assert(ClampSkillPointBonus(-5).value == 0 && ClampSkillPointBonus(-5).negative);
+    assert(ClampSkillPointBonus(std::numeric_limits<std::int32_t>::min()).value == 0);
+    assert(ClampSkillPointBonus(kMaxSkillPointBonus).value == kMaxSkillPointBonus);
+    assert(!ClampSkillPointBonus(kMaxSkillPointBonus).clamped);
+    assert(ClampSkillPointBonus(kMaxSkillPointBonus + 1).value == kMaxSkillPointBonus);
+    assert(ClampSkillPointBonus(std::numeric_limits<std::int32_t>::max()).clamped);
+
+    // Totals: pending + points per level + bonus, through the overflow check.
+    const auto withBonus = [](int pending, int grant, std::int32_t bonus) {
+        return CheckedPointTotal(pending, grant + ClampSkillPointBonus(bonus).value);
+    };
+    assert(withBonus(2, 10, 0) == 12);
+    assert(withBonus(2, 10, 3) == 15);
+    assert(withBonus(2, 10, -4) == 12);
+    assert(withBonus(0, 10, 5000) == 1010);
+    assert(withBonus(0, 0, 2) == 2);  // bonus alone still opens the skill menu
+    assert(withBonus(0, 0, 0) == 0);
+    assert(!withBonus(std::numeric_limits<int>::max() - 5, 1000, 1000));
+
+    // Bonus is requested exactly once per level-up, after the pre-step.
+    assert(!flow.TakeBonusCall());  // idle: stray menus never ask
+    assert(flow.Begin(false, false) == FlowAction::kOpenSkillMenu);
+    assert(flow.TakeBonusCall());
+    assert(!flow.TakeBonusCall());
+    assert(flow.FinishSkillMenu(false, false) == FlowAction::kOpenVanilla);
+    assert(!flow.TakeBonusCall());
+    flow.Reset();
+    assert(flow.Begin(true, true) == FlowAction::kAwaitStep);
+    assert(!flow.TakeBonusCall());  // pre-step not finished yet
+    assert(flow.Continue() == FlowAction::kOpenSkillMenu);
+    assert(flow.TakeBonusCall());
+    assert(!flow.TakeBonusCall());
+    // No-points path: SAL's menu is skipped, the bonus was already asked for.
+    assert(flow.FinishSkillMenu(true, true) == FlowAction::kAwaitStep);
+    assert(!flow.TakeBonusCall());
+    assert(flow.Continue() == FlowAction::kOpenVanilla);
+    assert(!flow.TakeBonusCall());
+    flow.Reset();
+    // Each new level-up asks again.
+    assert(flow.Begin(false, false) == FlowAction::kOpenSkillMenu);
+    assert(flow.TakeBonusCall());
+    assert(flow.Begin(false, false) == FlowAction::kOpenSkillMenu);
+    assert(flow.TakeBonusCall());
+    flow.Reset();
+    assert(!flow.TakeBonusCall());
+
     // Character-created callback.
     CharacterCreatedSignal created;
     created.ObserveCreationMenuClosed();

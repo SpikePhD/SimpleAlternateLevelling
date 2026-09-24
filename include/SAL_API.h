@@ -1,6 +1,6 @@
 #pragma once
 
-// Simple Alternate Levelling (SAL) integration API, version 2.
+// Simple Alternate Levelling (SAL) integration API, version 3.
 //
 // Copy this header into a companion SKSE plugin. It has no dependencies
 // beyond <cstdint> and uses only plain C types and function pointers, so it
@@ -8,16 +8,20 @@
 //
 // Handshake: during SKSEPlugin_Load, register a messaging listener for the
 // sender SAL::kSenderName. At kPostPostLoad SAL broadcasts a message of type
-// SAL::kMessageInterface whose data points to a static SALInterfaceV2 that
-// stays valid for the life of the process. Its first member is a
-// SALInterfaceV1, so V1 consumers keep working unchanged:
+// SAL::kMessageInterface whose data points to a static SALInterfaceV3 that
+// stays valid for the life of the process. It begins with a SALInterfaceV2,
+// which begins with a SALInterfaceV1, so V1 and V2 consumers keep working
+// unchanged:
 //
 //     messaging->RegisterListener(SAL::kSenderName, [](SKSE::MessagingInterface::Message* msg) {
 //         if (!msg || msg->type != SAL::kMessageInterface || msg->dataLen < sizeof(SAL::SALInterfaceV1)) {
 //             return;
 //         }
 //         const auto* v1 = static_cast<const SAL::SALInterfaceV1*>(msg->data);
-//         if (v1->version >= SAL::kInterfaceVersion2 && msg->dataLen >= sizeof(SAL::SALInterfaceV2)) {
+//         if (v1->version >= SAL::kInterfaceVersion3 && msg->dataLen >= sizeof(SAL::SALInterfaceV3)) {
+//             const auto* v3 = static_cast<const SAL::SALInterfaceV3*>(msg->data);
+//             /* store v3, register callbacks including RegisterSkillPointBonus */
+//         } else if (v1->version >= SAL::kInterfaceVersion2 && msg->dataLen >= sizeof(SAL::SALInterfaceV2)) {
 //             const auto* v2 = static_cast<const SAL::SALInterfaceV2*>(msg->data);
 //             /* store v2, register callbacks including RegisterPreSkillMenuStep */
 //         } else if (v1->version >= SAL::kInterfaceVersion1) {
@@ -34,8 +38,8 @@
 // - ContinueLevelUp and RequestThresholdRefresh may be called from any
 //   thread; SAL performs the work on the main thread.
 // - Level-up sequence after SAL intercepts the vanilla LevelUp Menu:
-//     pre-skill-menu step (V2) -> SAL skill menu -> level-up step (V1)
-//     -> vanilla LevelUp Menu, opened once.
+//     pre-skill-menu step (V2) -> skill point bonus (V3) -> SAL skill menu
+//     -> level-up step (V1) -> vanilla LevelUp Menu, opened once.
 //   Each step is optional and waits independently. ContinueLevelUp resumes
 //   whichever step is waiting, so when both steps are registered each owner
 //   must call it exactly once per wait.
@@ -50,11 +54,13 @@ namespace SAL {
     inline constexpr std::uint32_t kMessageInterface = 0x53414C00u;  // 'SAL\0'
     inline constexpr std::uint32_t kInterfaceVersion1 = 1;
     inline constexpr std::uint32_t kInterfaceVersion2 = 2;
+    inline constexpr std::uint32_t kInterfaceVersion3 = 3;
 
     struct SALInterfaceV1 {
-        // Interface version of the broadcast: 1 for a V1-only SAL, 2 when
-        // this struct is the prefix of a SALInterfaceV2. Later versions only
-        // append members, so check version >= the version you need.
+        // Interface version of the broadcast: 1 for a V1-only SAL, 2 or 3 when
+        // this struct is the prefix of a SALInterfaceV2 or SALInterfaceV3.
+        // Later versions only append members, so check version >= the
+        // version you need.
         std::uint32_t version;
 
         // Threshold multiplier: the returned value multiplies the XP needed
@@ -93,7 +99,8 @@ namespace SAL {
     };
 
     struct SALInterfaceV2 {
-        // Layout-compatible prefix. v1.version is 2 in a V2 broadcast.
+        // Layout-compatible prefix. v1.version is 2 in a V2 broadcast and 3
+        // in a V3 broadcast.
         SALInterfaceV1 v1;
 
         // Pre-skill-menu step. When SAL has intercepted the vanilla LevelUp
@@ -105,5 +112,22 @@ namespace SAL {
         // as it does today when there are no skill points). Returning false
         // continues immediately.
         bool (*RegisterPreSkillMenuStep)(bool (*wantsStep)(std::uint32_t level));
+    };
+
+    struct SALInterfaceV3 {
+        // Layout-compatible prefix. v2.v1.version is 3 in a V3 broadcast.
+        SALInterfaceV2 v2;
+
+        // Skill point bonus. SAL calls bonus(level) exactly once per level-up
+        // it intercepts, after the pre-skill-menu step has finished (or right
+        // away when there is none) and before it computes the points for its
+        // skill menu; never for stray or re-opened menus. `level` is the
+        // player's current level. The return value is added to that
+        // level-up's grant: total = pending + points_per_level + bonus.
+        // Negative values count as 0, values above 1000 are clamped to 1000.
+        // If the skill menu cannot open or a commit is rejected, the bonus is
+        // kept in SAL's pending points like the base grant. SAL shows it in
+        // the skill menu as a bonus from other mods.
+        bool (*RegisterSkillPointBonus)(std::int32_t (*bonus)(std::uint32_t level));
     };
 }

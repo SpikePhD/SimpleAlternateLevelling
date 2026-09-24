@@ -97,7 +97,9 @@ while Confirm, `C`, or Escape atomically applies it and continues to Skyrim's
 vanilla attribute-selection menu. The final point does not auto-confirm.
 
 Each skill has - and + buttons; points added in this session show as a gold
-"+N", and capped skills show "Max". Use the mouse or keyboard: arrow keys move
+"+N", and capped skills show "Max". Below the point total, a gold line shows
+points carried over from earlier levels and any bonus granted by a companion
+mod through the [Integration API](#integration-api). Use the mouse or keyboard: arrow keys move
 through the Combat, Magic, and Stealth columns and the Reset/Confirm row, Enter
 or `+` adds a point, Backspace or `-` removes one, Tab and Shift+Tab cycle
 controls, `R` resets, and `C` or Escape confirms. Controller navigation is not
@@ -314,8 +316,9 @@ before. Copy [`include/SAL_API.h`](include/SAL_API.h) into the companion
 project; it depends only on `<cstdint>` and uses plain C types and function
 pointers, so it is safe across DLLs built with different toolchains.
 
-The current version is **2**. `SALInterfaceV2` starts with a complete
-`SALInterfaceV1`, so plugins written for V1 keep working.
+The current version is **3**. `SALInterfaceV3` starts with a complete
+`SALInterfaceV2`, which starts with a complete `SALInterfaceV1`, so plugins
+written for V1 or V2 keep working.
 
 ### Handshake
 
@@ -323,10 +326,10 @@ The current version is **2**. `SALInterfaceV2` starts with a complete
    `SAL::kSenderName` (`"SimpleAlternateLevelling"`).
 2. At `kPostPostLoad`, SAL dispatches a message of type
    `SAL::kMessageInterface` to all listeners. `msg->data` points to a static
-   `SAL::SALInterfaceV2` (`v1.version == 2`, `dataLen == sizeof(SALInterfaceV2)`)
+   `SAL::SALInterfaceV3` (`v2.v1.version == 3`, `dataLen == sizeof(SALInterfaceV3)`)
    that stays valid for the life of the process.
 3. Check `dataLen` and `version` for the version you need, keep the pointer,
-   and register callbacks. With a V1-only SAL, fall back to the V1 members.
+   and register callbacks. With an older SAL, fall back to the members it has.
 
 ```cpp
 messaging->RegisterListener(SAL::kSenderName, [](SKSE::MessagingInterface::Message* msg) {
@@ -334,6 +337,9 @@ messaging->RegisterListener(SAL::kSenderName, [](SKSE::MessagingInterface::Messa
         return;
     }
     const auto* v1 = static_cast<const SAL::SALInterfaceV1*>(msg->data);
+    if (v1->version >= SAL::kInterfaceVersion3 && msg->dataLen >= sizeof(SAL::SALInterfaceV3)) {
+        static_cast<const SAL::SALInterfaceV3*>(msg->data)->RegisterSkillPointBonus(&MyBonus);
+    }
     if (v1->version >= SAL::kInterfaceVersion2 && msg->dataLen >= sizeof(SAL::SALInterfaceV2)) {
         const auto* v2 = static_cast<const SAL::SALInterfaceV2*>(msg->data);
         v2->RegisterPreSkillMenuStep(&MyWantsPreStep);
@@ -364,7 +370,8 @@ without it.
 ```text
 vanilla LevelUp Menu opens -> SAL hides it
   -> pre-skill-menu step (V2): wantsStep(level)? wait for ContinueLevelUp
-  -> SAL skill menu ("no points" still skips it)
+  -> skill point bonus (V3): bonus(level), called exactly once
+  -> SAL skill menu: pending + points per level + bonus ("no points" still skips it)
   -> level-up step (V1): wantsStep(level)? wait for ContinueLevelUp
   -> vanilla LevelUp Menu opens once (attribute choice)
 ```
@@ -376,10 +383,11 @@ The threshold is refreshed only when the final vanilla LevelUp Menu closes.
 
 | Member | Contract |
 |---|---|
-| `v1.version` | `2` in a V2 broadcast, `1` from a V1-only SAL. Later versions only append members. |
+| `v1.version` | `3` in a V3 broadcast (`2` or `1` from an older SAL). Later versions only append members. |
 | `RegisterThresholdMultiplier(float (*provider)())` | `provider()` returns a multiplier for the XP needed per level. It is called whenever SAL writes the threshold: data load, game load, new game, settings changes, after each level-up, and on request. Non-finite or `<= 0` values are ignored (treated as 1.0); results are clamped to `[threshold_multiplier_floor, 1.0]`. It never changes reward scaling or the native `fXPLevelUpBase`/`fXPLevelUpMult` settings. |
 | `RequestThresholdRefresh()` | Recomputes the threshold after the provider's value changes. Requests made during a level-up (from interception or `LevelIncrease` until the vanilla LevelUp Menu closes, including both steps) are folded into the refresh SAL already does when that menu closes, so the engine's XP subtraction is never disturbed. |
 | `RegisterPreSkillMenuStep(bool (*wantsStep)(uint32_t level))` (V2) | Runs on every level-up SAL intercepts, before its skill menu, regardless of how many skill points it grants. `level` is the player's current level. `false` continues immediately; `true` makes SAL wait for `ContinueLevelUp`, after which it opens its skill menu (or skips it as usual when there are no points). Only decide and queue your UI here. |
+| `RegisterSkillPointBonus(int32_t (*bonus)(uint32_t level))` (V3) | Adds whole skill points to a level-up. Called **exactly once per intercepted level-up**, after the pre-skill-menu step has finished (or right away when there is none) and before SAL totals the points; never for stray or re-opened menus. `level` is the player's current level. The level's points become `pending + points_per_level + bonus`, so a bonus alone still opens the skill menu. Negative or throwing providers count as 0; values above 1000 are clamped to 1000; both are logged. If the skill menu cannot open, its session cannot start, or a commit is rejected, the bonus stays in SAL's pending points like the base grant. The menu shows it as "+N bonus from other mods" (`$SAL_ALLOC_BONUS`). |
 | `RegisterLevelUpStep(bool (*wantsStep)(uint32_t level))` | Runs when SAL is about to open the vanilla menu: after Confirm, and also when its own menu is skipped because there are no points or it failed to open. Same `true`/`false` contract; after `ContinueLevelUp` the vanilla LevelUp Menu opens. |
 | `ContinueLevelUp()` | Resumes **whichever step is waiting**. Idempotent; ignored when nothing waits. |
 | `RegisterCharacterCreated(void (*callback)())` | Called once per new character, after RaceSex Menu/RaceMenu closes and SAL has applied its starting skills (in Vanilla starting-skills mode, right after the menu closes). Never called for loaded saves or for a mid-game `showracemenu`. |

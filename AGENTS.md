@@ -18,7 +18,7 @@ SKSEPluginLoad()
 ├── Serialization callbacks  - cosave v6: persists pendingSkillPoints + skillsNormalized;
 │                              native PlayerSkills::xp remains owned by Skyrim
 ├── MessagingInterface kPostPostLoad
-│   └── Integration::Broadcast()      - dispatches SALInterfaceV2 (include/SAL_API.h) to all
+│   └── Integration::Broadcast()      - dispatches SALInterfaceV3 (include/SAL_API.h) to all
 │                                       plugins; companions listen for "SimpleAlternateLevelling"
 └── MessagingInterface kDataLoaded
     ├── SkillHook::Install()          - trampolines into PlayerCharacter::AddSkillExperience
@@ -52,7 +52,7 @@ SKSEPluginLoad()
 | `src/Progression.cpp` / `include/Progression.h` | Pure curve validation/threshold calculation and versioned cosave codec |
 | `src/RewardRules.cpp` / `include/RewardRules.h` | Dependency-free reward eligibility, lifecycle, arithmetic, and marker/lock mappings |
 | `src/Leveling.cpp` / `include/Leveling.h` | Game-setting synchronization, finalized-level threshold refresh with the integration multiplier, level-up-safe integration refresh |
-| `include/SAL_API.h` | Public consumer header: `SALInterfaceV2` with `SALInterfaceV1` prefix (C types and function pointers only), message type, sender name |
+| `include/SAL_API.h` | Public consumer header: `SALInterfaceV3` with `SALInterfaceV2`/`SALInterfaceV1` prefixes (C types and function pointers only), message type, sender name |
 | `src/Integration.cpp` / `include/Integration.h` | Interface instance, one-registrant slots, main-thread callback dispatch |
 | `src/UIRules.cpp` / `include/UIRules.h` | Dependency-free UI validation, transactional allocation session, level-up step hand-off and `LevelUpFlow` sequence, character-created signal |
 | `src/SkillHook.cpp` / `include/SkillHook.h` | `write_branch<5>` hooks: AddSkillExperience (discard), TESObjectBOOK::Activate (world-read trigger) |
@@ -75,6 +75,8 @@ Vanilla LevelUp Menu opens
   -> MenuOpenCloseEvent defers and hides it
   -> V2 pre-skill-menu step registered and wantsStep(level)? wait for ContinueLevelUp
      (fail-safe: 10 s of unpaused play); otherwise continue immediately
+  -> V3 skill point bonus: bonus(level) once per level-up (LevelUpFlow::TakeBonusCall),
+     clamped to 0..1000; total = pending + points_per_level + bonus
   -> SkillMenu snapshots the 18 native skill values
   -> mouse/keyboard allocations update preview deltas only
   -> Reset clears deltas without touching native actor values
@@ -90,6 +92,8 @@ Vanilla); only one step waits at a time and the shared `ContinueLevelUp` resumes
 `BeginLevelUpFlow` starts it after the vanilla menu is hidden. Every path that ends
 SAL's part (confirm, preserve-all, no points, invalid session) goes through
 `HandOffOrContinue`, so the V1 step runs even when the skill menu is skipped.
+Every failure after the bonus is taken keeps the full total (pending + grant + bonus)
+as pending points, because the provider already counts the bonus as granted.
 `IsDeferringVanillaLevelUp()` stays true while either step waits, so the threshold
 refresh still happens only on the final vanilla LevelUp Menu close. A vanilla open
 by something else during the pre-step is hidden again and continues to the skill

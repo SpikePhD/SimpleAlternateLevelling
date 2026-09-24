@@ -73,6 +73,7 @@ namespace EA::SkillMenu {
         bool                        s_vanillaContinuationQueued{ false };
         bool                        s_movieLoaded{ false };
         int                         s_pendingCarryOver{ 0 };
+        int                         s_levelBonus{ 0 };
 
         std::string s_pointsLabel{ "Distribute Skill Points" };
         std::string s_confirmLabel{ "Confirm" };
@@ -80,6 +81,7 @@ namespace EA::SkillMenu {
         std::string s_levelLabel{ "Level" };
         std::string s_remainingLabel{ "points remaining" };
         std::string s_carriedLabel{ "carried over from earlier levels" };
+        std::string s_bonusLabel{ "bonus from other mods" };
         std::string s_maxLabel{ "Max" };
         std::string s_combatLabel{ "Combat" };
         std::string s_magicLabel{ "Magic" };
@@ -146,6 +148,26 @@ namespace EA::SkillMenu {
         {
             auto* player = RE::PlayerCharacter::GetSingleton();
             return player ? static_cast<std::uint32_t>(player->GetLevel()) : 0u;
+        }
+
+        // Asks the integration provider once per intercepted level-up (see
+        // UIRules::LevelUpFlow::TakeBonusCall) and returns the clamped bonus.
+        [[nodiscard]] int TakeSkillPointBonus()
+        {
+            if (!s_flow.TakeBonusCall() || !Integration::HasSkillPointBonus()) {
+                return 0;
+            }
+            const auto level = CurrentLevel();
+            const auto raw = Integration::SkillPointBonus(level);
+            const auto bonus = UIRules::ClampSkillPointBonus(raw);
+            if (bonus.negative) {
+                logger::warn("[EA] SkillMenu: negative skill point bonus {} from integration counts as 0.", raw);
+            } else if (bonus.clamped) {
+                logger::warn("[EA] SkillMenu: skill point bonus {} from integration clamped to {}.",
+                    raw, UIRules::kMaxSkillPointBonus);
+            }
+            logger::info("[EA] SkillMenu: skill point bonus from integration: {} (level {}).", bonus.value, level);
+            return bonus.value;
         }
 
         [[nodiscard]] std::string_view WaitingStepName()
@@ -320,6 +342,8 @@ namespace EA::SkillMenu {
             info.SetMember("levelLabel", RE::GFxValue(s_levelLabel.c_str()));
             info.SetMember("remainingLabel", RE::GFxValue(s_remainingLabel.c_str()));
             info.SetMember("carriedLabel", RE::GFxValue(s_carriedLabel.c_str()));
+            info.SetMember("bonus", RE::GFxValue(s_levelBonus));
+            info.SetMember("bonusLabel", RE::GFxValue(s_bonusLabel.c_str()));
             info.SetMember("maxLabel", RE::GFxValue(s_maxLabel.c_str()));
             info.SetMember("combatLabel", RE::GFxValue(s_combatLabel.c_str()));
             info.SetMember("magicLabel", RE::GFxValue(s_magicLabel.c_str()));
@@ -339,8 +363,8 @@ namespace EA::SkillMenu {
                 logger::error("[EA] SkillMenu: required EA_Init function is missing from the SWF.");
                 return false;
             }
-            logger::info("[EA] SkillMenu: transactional session initialized with {} points (carry={}).",
-                s_session.TotalPoints(), s_pendingCarryOver);
+            logger::info("[EA] SkillMenu: transactional session initialized with {} points (carry={}, bonus={}).",
+                s_session.TotalPoints(), s_pendingCarryOver, s_levelBonus);
             return true;
         }
 
@@ -399,6 +423,7 @@ namespace EA::SkillMenu {
             s_levelLabel = translate("$SAL_ALLOC_LEVEL", "Level");
             s_remainingLabel = translate("$SAL_ALLOC_REMAINING", "points remaining");
             s_carriedLabel = translate("$SAL_ALLOC_CARRIED", "carried over from earlier levels");
+            s_bonusLabel = translate("$SAL_ALLOC_BONUS", "bonus from other mods");
             s_maxLabel = translate("$SAL_ALLOC_MAX", "Max");
             s_combatLabel = translate("$SAL_GROUP_COMBAT", "Combat");
             s_magicLabel = translate("$SAL_GROUP_MAGIC", "Magic");
@@ -627,10 +652,12 @@ namespace EA::SkillMenu {
             return;
         }
         s_pendingCarryOver = XPManager::GetPendingSkillPoints();
-        const auto total = UIRules::CheckedPointTotal(s_pendingCarryOver, Config::skillPointsPerLevel);
+        // Both terms are validated to at most 1000, so the grant cannot overflow.
+        s_levelBonus = TakeSkillPointBonus();
+        const auto total = UIRules::CheckedPointTotal(s_pendingCarryOver, Config::skillPointsPerLevel + s_levelBonus);
         if (!total) {
-            logger::error("[EA] SkillMenu: pending points plus level grant overflowed; preserving pending={} and continuing vanilla.",
-                s_pendingCarryOver);
+            logger::error("[EA] SkillMenu: pending points plus level grant overflowed; preserving pending={} and continuing vanilla (bonus={} lost).",
+                s_pendingCarryOver, s_levelBonus);
             s_session.Cancel();
             HandOffOrContinue("point-total-overflow");
             return;
@@ -644,7 +671,10 @@ namespace EA::SkillMenu {
         std::array<float, UIRules::kSkillCount> snapshot{};
         RE::ActorValueOwner* owner = nullptr;
         if (!ReadCurrentSkillValues(snapshot, owner) || !s_session.Begin(*total, Config::skillCap, snapshot)) {
-            logger::warn("[EA] SkillMenu: unable to start a safe allocation session.");
+            // Keep this level's grant (including any integration bonus the
+            // provider has already counted as given) for the next level-up.
+            XPManager::SetPendingSkillPoints(*total);
+            logger::warn("[EA] SkillMenu: unable to start a safe allocation session; preserving all {} points.", *total);
             s_session.Cancel();
             HandOffOrContinue("invalid-session-input");
             return;
@@ -783,6 +813,7 @@ namespace EA::SkillMenu {
         s_vanillaContinuationQueued = false;
         s_movieLoaded = false;
         s_pendingCarryOver = 0;
+        s_levelBonus = 0;
 
         auto* ui = RE::UI::GetSingleton();
         auto* queue = RE::UIMessageQueue::GetSingleton();

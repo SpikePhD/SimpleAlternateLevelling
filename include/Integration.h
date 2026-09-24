@@ -19,5 +19,10 @@ namespace EA::Integration {
     [[nodiscard]] bool HasPreSkillMenuStep();
     [[nodiscard]] bool WantsPreSkillMenuStep(std::uint32_t level);
 
+    [[nodiscard]] bool HasSkillPointBonus();
+    // The provider's raw value (0 when none is registered or it throws).
+    // Clamping is UIRules::ClampSkillPointBonus's job.
+    [[nodiscard]] std::int32_t SkillPointBonus(std::uint32_t level);
+
     void NotifyCharacterCreated();
 }

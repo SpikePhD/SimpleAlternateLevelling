@@ -72,6 +72,7 @@ function EA_Init(skillData, totalPoints, carryOver, pointsLabel, confirmLabel, r
     g_labels = {
         level: 0, levelLabel: "Level", remainingLabel: "points remaining",
         carriedLabel: "carried over from earlier levels", maxLabel: "Max",
+        bonus: 0, bonusLabel: "bonus from other mods",
         combatLabel: "Combat", magicLabel: "Magic", stealthLabel: "Stealth", hint: ""
     };
     if (info != undefined) {
@@ -186,8 +187,13 @@ function _build() {
     _text(m, "titleTF", 11, 0, 50, STAGE_W, 38, g_pointsLabel, _fmt(26, COLOR_TITLE, "center"));
     g_pointsTF = _text(m, "pointsTF", 12, 0, 90, STAGE_W, 56, "", _fmt(42, COLOR_WHITE, "center"));
     _text(m, "remainingTF", 13, 0, 144, STAGE_W, 22, g_labels.remainingLabel, _fmt(14, COLOR_MUTED, "center"));
-    if (g_carryOver > 0) {
-        _text(m, "carryTF", 14, 0, 164, STAGE_W, 20, "+" + g_carryOver + " " + g_labels.carriedLabel, _fmt(12, COLOR_GOLD, "center"));
+    // Carried-over and integration bonus points share one line above the divider.
+    var extras = [];
+    if (g_carryOver > 0) { extras.push("+" + g_carryOver + " " + g_labels.carriedLabel); }
+    var bonus = Number(g_labels.bonus);
+    if (bonus > 0) { extras.push("+" + bonus + " " + g_labels.bonusLabel); }
+    if (extras.length > 0) {
+        _text(m, "carryTF", 14, 0, 164, STAGE_W, 20, extras.join("   \u00B7   "), _fmt(12, COLOR_GOLD, "center"));
     }
 
     var lines = m.createEmptyMovieClip("lines", 20);

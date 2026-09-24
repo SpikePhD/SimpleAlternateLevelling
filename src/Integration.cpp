@@ -13,10 +13,12 @@ namespace EA::Integration {
         using MultiplierProvider = float (*)();
         using LevelUpStep = bool (*)(std::uint32_t);
         using CharacterCreatedCallback = void (*)();
+        using SkillPointBonus = std::int32_t (*)(std::uint32_t);
 
         std::atomic<MultiplierProvider>       s_multiplierProvider{ nullptr };
         std::atomic<LevelUpStep>              s_levelUpStep{ nullptr };
         std::atomic<LevelUpStep>              s_preSkillMenuStep{ nullptr };
+        std::atomic<SkillPointBonus>          s_skillPointBonus{ nullptr };
         std::atomic<CharacterCreatedCallback> s_characterCreated{ nullptr };
         bool                                  s_broadcast{ false };
 
@@ -67,6 +69,11 @@ namespace EA::Integration {
             return RegisterSlot(s_preSkillMenuStep, wantsStep, "pre-skill-menu step");
         }
 
+        bool RegisterSkillPointBonusApi(SkillPointBonus bonus)
+        {
+            return RegisterSlot(s_skillPointBonus, bonus, "skill point bonus");
+        }
+
         bool AskStep(LevelUpStep step, std::uint32_t level, std::string_view name)
         {
             if (!step) {
@@ -80,16 +87,19 @@ namespace EA::Integration {
             }
         }
 
-        SAL::SALInterfaceV2 s_interface{
+        SAL::SALInterfaceV3 s_interface{
             {
-                SAL::kInterfaceVersion2,
-                RegisterThresholdMultiplierApi,
-                RequestThresholdRefreshApi,
-                RegisterLevelUpStepApi,
-                ContinueLevelUpApi,
-                RegisterCharacterCreatedApi
+                {
+                    SAL::kInterfaceVersion3,
+                    RegisterThresholdMultiplierApi,
+                    RequestThresholdRefreshApi,
+                    RegisterLevelUpStepApi,
+                    ContinueLevelUpApi,
+                    RegisterCharacterCreatedApi
+                },
+                RegisterPreSkillMenuStepApi
             },
-            RegisterPreSkillMenuStepApi
+            RegisterSkillPointBonusApi
         };
     }
 
@@ -112,11 +122,11 @@ namespace EA::Integration {
         if (!raw.Dispatch(SKSE::GetPluginHandle(), SAL::kMessageInterface, &s_interface,
                 static_cast<std::uint32_t>(sizeof(s_interface)), nullptr)) {
             logger::info("[EA] Integration: interface V{} broadcast; no companion plugin is listening.",
-                s_interface.v1.version);
+                s_interface.v2.v1.version);
             return;
         }
         logger::info("[EA] Integration: interface V{} broadcast to listeners of '{}'.",
-            s_interface.v1.version, SAL::kSenderName);
+            s_interface.v2.v1.version, SAL::kSenderName);
     }
 
     bool HasThresholdMultiplier()
@@ -156,6 +166,25 @@ namespace EA::Integration {
     bool WantsPreSkillMenuStep(std::uint32_t level)
     {
         return AskStep(s_preSkillMenuStep.load(), level, "pre-skill-menu step");
+    }
+
+    bool HasSkillPointBonus()
+    {
+        return s_skillPointBonus.load() != nullptr;
+    }
+
+    std::int32_t SkillPointBonus(std::uint32_t level)
+    {
+        const auto bonus = s_skillPointBonus.load();
+        if (!bonus) {
+            return 0;
+        }
+        try {
+            return bonus(level);
+        } catch (...) {
+            logger::error("[EA] Integration: skill point bonus threw for level {}; using 0.", level);
+            return 0;
+        }
     }
 
     void NotifyCharacterCreated()
