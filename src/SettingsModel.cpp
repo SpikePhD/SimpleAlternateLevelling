@@ -108,7 +108,15 @@ namespace EA {
                 if (it.value().is_boolean()) descriptor.kind = SettingKind::Toggle;
                 else if (key == "starting_skills.mode") descriptor.kind = SettingKind::StartingMode;
                 else if (it.value().is_number_integer()) descriptor.kind = SettingKind::Integer;
-                if (key.starts_with("leveling.")) {
+                if (key == "leveling.reward_scaling") {
+                    descriptor.minimum = 0;
+                    descriptor.maximum = 1;
+                    descriptor.step = 0.05;
+                } else if (key.starts_with("leveling.reward_weights.")) {
+                    descriptor.minimum = 0;
+                    descriptor.maximum = 4;
+                    descriptor.step = 0.1;
+                } else if (key.starts_with("leveling.")) {
                     descriptor.minimum = key.ends_with("xp_increase") ? 0 : 0.01;
                     descriptor.maximum = key.ends_with("xp_cap") ? 10000000 : 1000000;
                     descriptor.step = key.ends_with("xp_increase") ? 1 : 5;
@@ -231,8 +239,10 @@ namespace EA {
         }
         if (name == "faster" || name == "slower") {
             const double factor = name == "faster" ? 0.75 : 1.35;
+            // Only the XP curve; reward growth and weights keep their values.
             for (const auto& descriptor : registry_) {
-                if (descriptor.section != SettingSection::Progression) continue;
+                if (descriptor.key != "leveling.xp_base" && descriptor.key != "leveling.xp_increase" &&
+                    descriptor.key != "leveling.xp_cap") continue;
                 const auto* base = Find(shipped_, descriptor.key);
                 if (base && base->is_number()) {
                     const auto value = std::clamp(base->get<double>() * factor, descriptor.minimum, descriptor.maximum);

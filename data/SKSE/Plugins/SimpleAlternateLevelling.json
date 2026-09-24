@@ -203,10 +203,20 @@
     "xp_base":     75.0,
     "xp_increase": 25.0,
     "xp_cap":      10000000.0,
+    "reward_scaling": 0.5,
+    "reward_weights": {
+      "quest":       0.6,
+      "kill":        1.5,
+      "exploration": 1.0,
+      "lock":        1.0,
+      "book":        1.0,
+      "pickpocket":  1.0
+    },
     "_comment": "xp_base maps to fXPLevelUpBase, xp_increase to fXPLevelUpMult.",
     "_comment_formula": "threshold(level) = min(xp_cap, xp_base + level * xp_increase)",
     "_comment_vanilla": "Defaults match vanilla: xp_base=75, xp_increase=25, effectively uncapped.",
     "_comment_cap": "Lower xp_cap to stop the threshold growing at high levels.",
+    "_comment_reward_scaling": "Every XP reward is multiplied by (threshold(level) / threshold(1)) ^ (reward_scaling * weight of its source), with the exponent capped at 1. 0 keeps rewards flat; 1 makes every level take the same effort. Weights above 1 make a source grow faster, below 1 slower.",
     "_comment_testing": "For fast testing, override xp_base=5, xp_increase=1 in SimpleAlternateLevelling.user.json."
   }
 }

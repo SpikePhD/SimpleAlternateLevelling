@@ -28,6 +28,14 @@ namespace EA::Progression {
     [[nodiscard]] CurveValidation ValidateCurve(LevelCurve input, LevelCurve defaults) noexcept;
     [[nodiscard]] float CalculateThreshold(std::uint32_t level, LevelCurve curve) noexcept;
 
+    // Multiplier applied to every XP reward so rewards grow with the level
+    // curve: (threshold(level) / threshold(1)) ^ exponent. Exponent 0 keeps
+    // rewards flat (effort per level grows with the curve); 1 makes every
+    // level cost the same effort. Values between keep levels progressively
+    // harder but gentler. Invalid inputs yield 1 (no scaling).
+    inline constexpr float kDefaultRewardScaling = 0.5f;
+    [[nodiscard]] double RewardScale(std::uint32_t level, LevelCurve curve, float exponent) noexcept;
+
     struct CosaveState {
         std::int32_t pendingSkillPoints{ 0 };
         bool         skillsNormalized{ false };

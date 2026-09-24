@@ -53,6 +53,9 @@ SKSEPluginLoad()
 | `src/SkillMenu.cpp` / `include/SkillMenu.h` | Validated Scaleform boundary, menu lifecycle, preview/commit transaction, vanilla continuation |
 | `src/SettingsModel.cpp` / `include/SettingsModel.h` | Defaults-driven setting registry, bounds, layering, migration, presets, draft transaction, overrides |
 | `src/SettingsPage.cpp` / `include/SettingsPage.h` | Optional settings page in SKSE Menu Framework's Mod Control Panel (ImGui) |
+| `src/InfoPages.cpp` / `include/InfoPages.h` | Stats and XP Log pages in SKSE Menu Framework (session-only) |
+| `src/XPJournal.cpp` / `include/XPJournal.h` | Mutex-guarded session record of awards and skipped/merged rewards; diagnostics ring buffer |
+| `src/UIText.cpp` / `include/UIText.h` | Cached, thread-safe `$SAL_*` translation lookup and `{placeholder}` formatting for pages |
 | `extern/SKSEMenuFramework/SKSEMenuFramework.h` | Vendored MIT header from QTR-Modding/SKSE-Menu-Framework-3-Example @ `aa8effa`; runtime-resolved, no link dependency |
 | `src/EventSinks.cpp` / `include/EventSinks.h` | All BSTEventSink structs + `Register()` |
 | `include/PCH.h` | Precompiled header: RE/Skyrim.h, SKSE, spdlog sinks, std includes |
@@ -95,6 +98,12 @@ ImGui rendering may run off the main thread. Every settings-model access takes t
 mutex, and saving/applying (which rebuilds Config globals read by event sinks) is queued to
 the main thread with `SKSE::GetTaskInterface()->AddTask`. Keep it that way.
 
+The Stats and XP Log pages read `XPJournal`, which `XPManager::AwardXP` and the event sinks
+fill on the main thread (awards, plus notes for own-minion kills, merged objective batches,
+zero rewards, and empty location clears). The journal and session stats reset with the other
+transient reward state on load, revert, and new game; nothing is saved. Diagnostics come from
+an in-memory spdlog ring buffer (last 300 lines, info and above, never trace).
+
 Custom notification text stays JSON-only. Starting-skill mode and values are snapshotted on
 `kNewGame`, so later changes cannot alter existing characters. Skill points per level apply
 only to future level-ups. Keep all visible page text in the translation file; labels and
@@ -126,6 +135,23 @@ threshold(level) = min(xpCap, xpBase + max(level, 1) * xpIncrease)
 ```
 
 `xpBase` -> `fXPLevelUpBase`, `xpIncrease` -> `fXPLevelUpMult`.
+
+README.md "How XP is calculated" is the player-facing reference for every source's base
+value, the scaling, and worked examples. Keep it in sync with any reward change.
+
+Every reward is scaled in `XPManager::AwardXP`, the single entry point for all sources:
+
+```text
+reward = base * (threshold(level) / threshold(1)) ^ min(1, reward_scaling * weight[source])
+```
+
+`Progression::RewardScale` computes the factor from the same capped curve, so it stops
+growing at the cap. `RewardRules::ClassifyRewardSource` maps the award's source key to one
+of six weights (quest, kill, exploration, lock, book, pickpocket). Shipped defaults:
+`reward_scaling=0.5`, quest weight 0.6, kill weight 1.5, others 1.0, so quests dominate
+early and fighting becomes the main XP source at high levels. Kill base values are
+`(type base + level-difference bonus) * kill multiplier` before this scaling. The Faster/
+Slower presets change only the XP curve, never the scaling or weights.
 The threshold calculation uses double-precision intermediate arithmetic. The curve is
 written to the game settings, and the result is written directly to
 `skills->data->levelThreshold` on data load, cosave load, new game, and after each
@@ -172,10 +198,15 @@ is collision-free. `IsRead()` is still false inside `Activate` before the origin
   spell tomes open no menu). Reading from the inventory or a container never calls `Activate`.
   Spell tomes award book XP like other books.
 - XP notifications pass `cancelIfAlreadyQueued=false`; with `true` the HUD drops a message whose
-  text is already queued. Awards with the same notification key merge for 2 seconds.
+  text is already queued. Awards with the same notification key merge for 1 second, messages
+  are spaced 1 second apart, and a message due while a pausing menu is open (for example looting
+  a body right after the kill) waits until the game resumes; otherwise the HUD loses it.
 - `"Skill Books Read"` TrackedStat fires for skill books in AE; `"Books Read"` does not.
 - Misc quests never set `IsCompleted()`. Award objective XP from exact
-  `ObjectiveState::Event` transitions; the tracked stat is diagnostic only.
+  `ObjectiveState::Event` transitions; the tracked stat is diagnostic only. Misc-quest scripts
+  often complete every remaining objective (untaken branches, optional steps) in one frame
+  when the errand ends, so completions are batched per quest for one frame and each batch
+  pays a single objective reward (`RewardRules::ObjectiveBatcher`).
 - Capture lock difficulty when `Lockpicking Menu` opens. Once the reference unlocks, its
   tier is no longer a reliable source for the `"Locks Picked"` success event.
 - `QuestStatus::Event` is the quest reward authority. Completion awards once, while started

@@ -84,6 +84,20 @@ namespace EA::Progression {
         return static_cast<float>(uncapped);
     }
 
+    double RewardScale(std::uint32_t level, LevelCurve curve, float exponent) noexcept
+    {
+        if (!std::isfinite(exponent) || exponent <= 0.0f) {
+            return 1.0;
+        }
+        const double first = CalculateThreshold(1, curve);
+        const double current = CalculateThreshold(level, curve);
+        if (!std::isfinite(first) || !std::isfinite(current) || first <= 0.0 || current <= 0.0) {
+            return 1.0;
+        }
+        const double scale = std::pow(current / first, std::min(1.0, static_cast<double>(exponent)));
+        return std::isfinite(scale) && scale > 0.0 ? scale : 1.0;
+    }
+
     std::array<std::byte, kCosaveV6Size> EncodeCosaveV6(const CosaveState& state) noexcept
     {
         std::array<std::byte, kCosaveV6Size> encoded{};

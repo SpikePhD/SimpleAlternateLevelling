@@ -15,6 +15,9 @@ EXPECTED = {
     ("leveling", "xp_base"): 75.0,
     ("leveling", "xp_increase"): 25.0,
     ("leveling", "xp_cap"): 10000000.0,
+    ("leveling", "reward_scaling"): 0.5,
+    ("leveling", "reward_weights", "quest"): 0.6,
+    ("leveling", "reward_weights", "kill"): 1.5,
 }
 
 

@@ -75,6 +75,8 @@ int main(int argc, char** argv)
 
     assert(model.ApplyPreset("faster"));
     assert(model.Draft()["leveling"]["xp_base"].get<double>() < defaults["leveling"]["xp_base"].get<double>());
+    assert(model.Draft()["leveling"]["reward_scaling"] == defaults["leveling"]["reward_scaling"]);
+    assert(model.Draft()["leveling"]["reward_weights"]["kill"] == defaults["leveling"]["reward_weights"]["kill"]);
     assert(model.ApplyPreset("slower"));
     assert(model.Draft()["leveling"]["xp_base"].get<double>() > defaults["leveling"]["xp_base"].get<double>());
     assert(model.ApplyPreset("vanilla_curve"));

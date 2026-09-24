@@ -5,6 +5,7 @@
 #include "Leveling.h"
 #include "RewardRules.h"
 #include "SkillMenu.h"
+#include "XPJournal.h"
 #include "RE/A/ActorKill.h"
 #include "RE/E/ExtraMapMarker.h"
 #include "RE/I/ItemsPickpocketed.h"
@@ -31,6 +32,8 @@ namespace EA::EventSinks {
     static std::optional<std::int32_t> s_lastLockCounter;
     static RewardRules::NewlyFlaggedTracker s_clearedLocations;
     static RewardRules::NewlyFlaggedTracker s_readBooks;
+    static RewardRules::ObjectiveBatcher s_objectiveBatcher;
+    static std::unordered_map<std::uint32_t, std::string> s_objectiveText;
 
     namespace {
         static std::string_view ClassifyMarkerType(RE::MARKER_TYPE type) {
@@ -306,6 +309,7 @@ namespace EA::EventSinks {
             const auto newlyCleared = s_clearedLocations.Observe(CollectEverClearedLocations());
             if (newlyCleared.empty()) {
                 logger::warn("[EA] Location clear: event had no newly ever-cleared location; skipped.");
+                XPJournal::RecordNote(RewardRules::RewardSource::kExploration, {}, "$SAL_NOTE_NO_LOCATION");
                 return;
             }
 
@@ -472,6 +476,9 @@ namespace EA::EventSinks {
             const bool playerCredited = killer == player || commander.get() == player;
             const bool victimIsPlayer = dying->IsPlayerRef();
             const bool victimCommandedByPlayer = victimCommander.get() == player;
+            if (playerCredited && victimCommandedByPlayer) {
+                XPJournal::RecordNote(RewardRules::RewardSource::kKill, dying->GetName(), "$SAL_NOTE_MINION");
+            }
             if (!RewardRules::ShouldRewardKill(playerCredited, victimIsPlayer, victimCommandedByPlayer)) {
                 logger::debug("[EA] Kill reward: '{}' killed by '{}' skipped (playerCredited={} victimIsPlayer={} playerMinion={}).",
                     dying->GetName(), killer->GetName(), playerCredited, victimIsPlayer, victimCommandedByPlayer);
@@ -640,11 +647,55 @@ namespace EA::EventSinks {
                 return RE::BSEventNotifyControl::kContinue;
             }
 
-            const auto text = objective->displayText.c_str();
-            const auto subject = (text && text[0]) ? text : "Misc Objective";
-            XPManager::AwardXP(Config::xpQuestObjectives,
-                XPManager::MakeStatContext(subject, "quest_objectives", objective->index, "misc_objective"));
+            const auto questID = objective->ownerQuest->GetFormID();
+            const auto* text = objective->displayText.c_str();
+            logger::debug("[EA] Objective: quest {:08X} objective {} '{}' state {} -> {}.",
+                questID, objective->index, text ? text : "",
+                static_cast<int>(event->oldState), static_cast<int>(event->newState));
+            if (!s_objectiveText.contains(questID)) {
+                s_objectiveText.emplace(questID, (text && text[0]) ? text : "Misc Objective");
+            }
+            if (s_objectiveBatcher.Add(questID, objective->index)) {
+                QueueObjectiveFlush();
+            }
             return RE::BSEventNotifyControl::kContinue;
+        }
+
+    private:
+        // Pays each quest's same-frame batch once (see RewardRules::ObjectiveBatcher).
+        static void FlushObjectives()
+        {
+            for (const auto& batch : s_objectiveBatcher.Flush()) {
+                const auto found = s_objectiveText.find(batch.questID);
+                const std::string subject = found != s_objectiveText.end() ? found->second : "Misc Objective";
+                if (batch.count > 1) {
+                    logger::info("[EA] Objective: {} objectives of quest {:08X} completed together; rewarded once.",
+                        batch.count, batch.questID);
+                    XPJournal::RecordNote(RewardRules::RewardSource::kQuest, subject, "$SAL_NOTE_BATCH",
+                        static_cast<int>(batch.count));
+                }
+                XPManager::AwardXP(Config::xpQuestObjectives,
+                    XPManager::MakeStatContext(subject, "quest_objectives",
+                        static_cast<int>(batch.firstObjectiveIndex), "misc_objective"));
+            }
+            s_objectiveText.clear();
+        }
+
+        static void QueueObjectiveFlush()
+        {
+            auto* tasks = SKSE::GetTaskInterface();
+            if (!tasks) {
+                FlushObjectives();
+                return;
+            }
+            const auto generation = XPManager::GetRewardGeneration();
+            tasks->AddTask([generation]() {
+                if (XPManager::GetRewardGeneration() != generation) {
+                    logger::debug("[EA] Objective: stale batch discarded after state reset.");
+                    return;
+                }
+                FlushObjectives();
+            });
         }
     };
 
@@ -753,6 +804,8 @@ namespace EA::EventSinks {
         s_lastLockCounter.reset();
         s_clearedLocations.Invalidate();
         s_readBooks.Invalidate();
+        s_objectiveBatcher.Reset();
+        s_objectiveText.clear();
         logger::debug("[EA] Transient reward state reset.");
     }
 

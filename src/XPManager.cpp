@@ -1,7 +1,9 @@
 #include "PCH.h"
 #include "XPManager.h"
 #include "Config.h"
+#include "Progression.h"
 #include "RewardRules.h"
+#include "XPJournal.h"
 
 #include <algorithm>
 #include <chrono>
@@ -23,7 +25,12 @@ namespace EA::XPManager {
 
         // Awards with the same notification key within this window of the
         // first one are merged into a single HUD message with their total.
-        constexpr auto kNotificationMergeWindow = std::chrono::seconds(2);
+        constexpr auto kNotificationMergeWindow = std::chrono::seconds(1);
+
+        // A notification sent while a pausing menu (container, inventory, map,
+        // ...) hides the HUD can be lost, e.g. when looting a body right after
+        // the kill. Such notifications wait and retry at this interval.
+        constexpr auto kNotificationPausedRetry = std::chrono::milliseconds(500);
 
         struct PendingNotification {
             std::uint64_t id{ 0 };
@@ -56,6 +63,10 @@ namespace EA::XPManager {
             const auto it = std::ranges::find(s_pendingNotifications, id, &PendingNotification::id);
             if (it == s_pendingNotifications.end()) {
                 return;  // Discarded by a load, revert, or new game.
+            }
+            if (auto* ui = RE::UI::GetSingleton(); ui && ui->GameIsPaused()) {
+                ScheduleFlush(id, kNotificationPausedRetry);
+                return;
             }
             const auto now = std::chrono::steady_clock::now();
             if (now < s_nextNotificationSlot) {
@@ -188,6 +199,7 @@ namespace EA::XPManager {
         s_questLifecycle.Reset();
         s_discoveredLocationMarkers.clear();
         s_pendingNotifications.clear();
+        XPJournal::ResetSession();
         ++s_rewardGeneration;
         if (s_rewardGeneration == 0) {
             s_rewardGeneration = 1;
@@ -248,9 +260,11 @@ namespace EA::XPManager {
     // level increment, threshold update for the next level, and overflow carry
     // entirely natively. No chaining code needed on our side.
     // -----------------------------------------------------------------------
-    void AwardXP(float amount, const AwardContext& context) {
-        if (!std::isfinite(amount) || amount <= 0.0f) {
-            logger::warn("[EA] AwardXP: rejected invalid amount {} from source '{}'.", amount, context.sourceKey);
+    void AwardXP(float baseAmount, const AwardContext& context) {
+        if (!std::isfinite(baseAmount) || baseAmount <= 0.0f) {
+            logger::warn("[EA] AwardXP: rejected invalid amount {} from source '{}'.", baseAmount, context.sourceKey);
+            XPJournal::RecordNote(RewardRules::ClassifyRewardSource(context.sourceKey),
+                std::string(context.subject), "$SAL_NOTE_ZERO");
             return;
         }
 
@@ -263,6 +277,20 @@ namespace EA::XPManager {
         auto* skills = player->GetInfoRuntimeData().skills;
         if (!skills || !skills->data) {
             logger::warn("[EA] AwardXP: PlayerSkills or data is null.");
+            return;
+        }
+
+        // Every source grows with the level curve (see Progression::RewardScale);
+        // its weight sets how fast. RewardScale caps the exponent at 1.
+        const auto source = RewardRules::ClassifyRewardSource(context.sourceKey);
+        const auto weight = EA::Config::rewardWeights[static_cast<std::size_t>(source)];
+        const auto level = static_cast<std::uint32_t>(player->GetLevel());
+        const auto scale = Progression::RewardScale(level,
+            { EA::Config::xpBase, EA::Config::xpIncrease, EA::Config::xpCap }, EA::Config::rewardScaling * weight);
+        const float amount = static_cast<float>(static_cast<double>(baseAmount) * scale);
+        if (!std::isfinite(amount) || amount <= 0.0f) {
+            logger::warn("[EA] AwardXP: scaled amount {} from source '{}' is invalid; award rejected.",
+                amount, context.sourceKey);
             return;
         }
 
@@ -289,8 +317,10 @@ namespace EA::XPManager {
         skills->data->xp = systemXPAfter;
 
         if (EA::Config::verbose) {
-            logger::info("[EA] XP award: +{:.1f} | source={} | {} | system_xp={:.1f} -> {:.1f} | threshold={:.1f} | level={}",
+            logger::info("[EA] XP award: +{:.1f} (base {:.1f} x{:.2f}) | source={} | {} | system_xp={:.1f} -> {:.1f} | threshold={:.1f} | level={}",
                 amount,
+                baseAmount,
+                scale,
                 context.sourceKey,
                 DescribeContext(context),
                 systemXPBefore,
@@ -298,6 +328,26 @@ namespace EA::XPManager {
                 skills->data->levelThreshold,
                 static_cast<int>(player->GetLevel()));
         }
+
+        XPJournal::Entry entry;
+        entry.source = source;
+        entry.baseXP = baseAmount;
+        entry.scale = scale;
+        entry.xp = amount;
+        entry.playerLevel = static_cast<int>(level);
+        if (context.kind == AwardKind::Kill) {
+            entry.subject = std::string(context.subject);
+            entry.enemyLevel = context.level.value_or(0);
+        } else if (source == RewardRules::RewardSource::kLock && !context.subtype.empty()) {
+            std::string tier(context.subtype);
+            for (auto& c : tier) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+            entry.subjectKey = "$SAL_SETTING_XP_SOURCES_LOCKPICK_" + tier;
+        } else if (source == RewardRules::RewardSource::kPickpocket) {
+            entry.subjectKey = "$SAL_SETTING_XP_SOURCES_PICKPOCKET_BASE";
+        } else {
+            entry.subject = std::string(context.subject);
+        }
+        XPJournal::RecordAward(std::move(entry));
 
         if (EA::Config::notificationsEnabled) {
             std::string notifKey;

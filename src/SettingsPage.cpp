@@ -4,6 +4,7 @@
 #include "Config.h"
 #include "Leveling.h"
 #include "SettingsModel.h"
+#include "UIText.h"
 
 #include <SKSE/Translation.h>
 
@@ -58,7 +59,6 @@ namespace EA::SettingsPage {
 
         std::mutex s_mutex;
         std::unordered_map<std::string, std::size_t> s_indexByKey;
-        std::unordered_map<std::string, std::string> s_text;
         std::unordered_map<std::string, double> s_editing;  // in-progress numeric edits
         std::string s_status;
         bool s_statusIsError = false;
@@ -70,17 +70,7 @@ namespace EA::SettingsPage {
         // Text
         // -------------------------------------------------------------------
 
-        const std::string& T(const std::string& key)
-        {
-            if (const auto it = s_text.find(key); it != s_text.end()) {
-                return it->second;
-            }
-            std::string value;
-            if (!SKSE::Translation::Translate(key, value) || value.empty()) {
-                value = key;
-            }
-            return s_text.emplace(key, std::move(value)).first->second;
-        }
+        const std::string& T(const std::string& key) { return UIText::Get(key); }
 
         std::string SettingToken(std::string_view key)
         {
@@ -343,6 +333,14 @@ namespace EA::SettingsPage {
                 if (ImGui::Checkbox(T("$SAL_PAGE_NO_CAP").c_str(), &noCap)) {
                     Commit("leveling.xp_cap", Json(noCap ? kUncappedXP : kCappedFallbackXP));
                 }
+                DrawSetting("leveling.reward_scaling");
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::Spacing();
+                ImGui::TextDisabled("%s", T("$SAL_PAGE_WEIGHTS").c_str());
+                for (const auto source : Config::kRewardWeightKeys) {
+                    DrawSetting("leveling.reward_weights." + std::string(source));
+                }
                 ImGui::EndTable();
             }
             if (ImGui::SmallButton(T("$SAL_RESET_SECTION").c_str())) {
@@ -545,7 +543,6 @@ namespace EA::SettingsPage {
         }
         {
             std::lock_guard lock(s_mutex);
-            SKSE::Translation::ParseTranslation("SimpleAlternateLevelling");
             const auto& registry = Config::Settings().Registry();
             for (std::size_t i = 0; i < registry.size(); ++i) {
                 s_indexByKey.emplace(registry[i].key, i);

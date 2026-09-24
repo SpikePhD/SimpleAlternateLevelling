@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -85,6 +86,18 @@ namespace EA::Config {
     inline float xpBase     = kDefaultXPBase;
     inline float xpIncrease = kDefaultXPIncrease;
     inline float xpCap      = kDefaultXPCap;
+
+    // Exponent of the level-based multiplier applied to every XP reward
+    // (see Progression::RewardScale). Range 0 to 1.
+    inline float rewardScaling = 0.5f;
+
+    // Per-source multiplier of rewardScaling, indexed by
+    // RewardRules::RewardSource. The combined exponent is capped at 1.
+    inline constexpr std::array<std::string_view, 6> kRewardWeightKeys{
+        "quest", "kill", "exploration", "lock", "book", "pickpocket"
+    };
+    inline constexpr std::array<float, 6> kDefaultRewardWeights{ 0.6f, 1.5f, 1.0f, 1.0f, 1.0f, 1.0f };
+    inline std::array<float, 6> rewardWeights = kDefaultRewardWeights;
 
     // Skill allocation
     inline constexpr int   kDefaultSkillPointsPerLevel = 10;

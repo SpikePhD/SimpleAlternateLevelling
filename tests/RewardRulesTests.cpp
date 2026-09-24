@@ -53,6 +53,46 @@ namespace {
         Check(tracker.Observe(Ids{ 0xA, 0xE }).empty(), "invalidated tracker does not mass-award");
     }
 
+    void TestObjectiveBatcher()
+    {
+        using EA::RewardRules::ObjectiveBatch;
+        using EA::RewardRules::ObjectiveBatcher;
+        ObjectiveBatcher batcher;
+        Check(batcher.Empty(), "batcher starts empty");
+        Check(batcher.Add(0x100, 10), "first completion asks for a flush");
+        Check(!batcher.Add(0x100, 20), "same-frame completion joins the batch");
+        Check(!batcher.Add(0x200, 5), "another quest in the same frame needs no second flush");
+        Check(!batcher.Add(0x100, 30), "third objective of the first quest joins its batch");
+        const auto flushed = batcher.Flush();
+        Check(flushed.size() == 2, "one entry per quest");
+        Check(flushed.size() == 2 && flushed[0] == (ObjectiveBatch{ 0x100, 10, 3 }),
+            "wrap-up batch keeps first objective and counts all");
+        Check(flushed.size() == 2 && flushed[1] == (ObjectiveBatch{ 0x200, 5, 1 }), "single completion stays single");
+        Check(batcher.Empty(), "flush clears the batch");
+        Check(batcher.Add(0x100, 40), "next frame starts a new batch");
+        batcher.Reset();
+        Check(batcher.Empty() && batcher.Flush().empty(), "reset drops pending completions");
+    }
+
+    void TestSessionStats()
+    {
+        using namespace EA::RewardRules;
+        SessionStats stats;
+        Check(stats.TotalXP() == 0.0 && stats.Share(RewardSource::kKill) == 0.0, "empty stats have no share");
+        stats.Add(RewardSource::kKill, 30.0);
+        stats.Add(RewardSource::kKill, 10.0);
+        stats.Add(RewardSource::kQuest, 60.0);
+        stats.Add(RewardSource::kBook, 0.0);
+        stats.Add(RewardSource::kBook, std::nan(""));
+        stats.Add(RewardSource::kCount, 50.0);
+        Check(stats.TotalXP() == 100.0, "total sums valid awards only");
+        Check(stats.TotalCount() == 3, "count ignores invalid awards");
+        Check(stats.For(RewardSource::kKill).count == 2 && stats.For(RewardSource::kKill).xp == 40.0, "per-source totals");
+        Check(stats.Share(RewardSource::kQuest) == 0.6, "share is a fraction of all XP");
+        stats.Reset();
+        Check(stats.TotalXP() == 0.0 && stats.TotalCount() == 0, "reset clears totals");
+    }
+
     void TestTransitionsAndEligibility()
     {
         using namespace EA::RewardRules;
@@ -91,6 +131,16 @@ namespace {
     void TestMappings()
     {
         using namespace EA::RewardRules;
+        Check(ClassifyRewardSource("quest_main") == RewardSource::kQuest, "quest type maps to quests");
+        Check(ClassifyRewardSource("quest_objectives") == RewardSource::kQuest, "misc objectives map to quests");
+        Check(ClassifyRewardSource("kill") == RewardSource::kKill, "kills map to kills");
+        Check(ClassifyRewardSource("location_discovery") == RewardSource::kExploration, "discovery maps to exploration");
+        Check(ClassifyRewardSource("location_cleared") == RewardSource::kExploration, "clearing maps to exploration");
+        Check(ClassifyRewardSource("lock_picked") == RewardSource::kLock, "locks map to locks");
+        Check(ClassifyRewardSource("book_read") == RewardSource::kBook, "books map to books");
+        Check(ClassifyRewardSource("book_skill") == RewardSource::kBook, "skill books map to books");
+        Check(ClassifyRewardSource("pickpocket") == RewardSource::kPickpocket, "pickpocket maps to pickpocket");
+        Check(ClassifyRewardSource("something_new") == RewardSource::kQuest, "unknown source uses quest growth");
         Check(ClassifyMarkerType(16) == "military_camp", "imperial camp mapping");
         Check(ClassifyMarkerType(29) == "giant_camp", "giant camp mapping");
         Check(ClassifyMarkerType(53) == "daedric_shrine", "Miraak Temple mapping");
@@ -114,6 +164,8 @@ int main()
 {
     TestQuestLifecycle();
     TestNewlyFlaggedTracker();
+    TestObjectiveBatcher();
+    TestSessionStats();
     TestTransitionsAndEligibility();
     TestKillRewards();
     TestMappings();

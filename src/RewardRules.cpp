@@ -58,6 +58,26 @@ namespace EA::RewardRules {
         return newlyFlagged;
     }
 
+    bool ObjectiveBatcher::Add(std::uint32_t questID, std::uint32_t objectiveIndex)
+    {
+        const bool first = batches_.empty();
+        for (auto& batch : batches_) {
+            if (batch.questID == questID) {
+                ++batch.count;
+                return first;
+            }
+        }
+        batches_.push_back({ questID, objectiveIndex, 1 });
+        return first;
+    }
+
+    std::vector<ObjectiveBatch> ObjectiveBatcher::Flush()
+    {
+        std::vector<ObjectiveBatch> result;
+        result.swap(batches_);
+        return result;
+    }
+
     bool IsObjectiveCompletionTransition(
         std::uint32_t oldState,
         std::uint32_t newState) noexcept
@@ -100,6 +120,60 @@ namespace EA::RewardRules {
             return std::numeric_limits<float>::quiet_NaN();
         }
         return static_cast<float>(total);
+    }
+
+    RewardSource ClassifyRewardSource(std::string_view sourceKey) noexcept
+    {
+        if (sourceKey.starts_with("quest_")) return RewardSource::kQuest;
+        if (sourceKey == "kill") return RewardSource::kKill;
+        if (sourceKey.starts_with("location_")) return RewardSource::kExploration;
+        if (sourceKey.starts_with("lock_")) return RewardSource::kLock;
+        if (sourceKey.starts_with("book_")) return RewardSource::kBook;
+        if (sourceKey == "pickpocket") return RewardSource::kPickpocket;
+        // Unknown keys count as quests, the most conservative growth.
+        return RewardSource::kQuest;
+    }
+
+    void SessionStats::Add(RewardSource source, double xp) noexcept
+    {
+        const auto index = static_cast<std::size_t>(source);
+        if (index >= totals_.size() || !std::isfinite(xp) || xp <= 0.0) {
+            return;
+        }
+        totals_[index].xp += xp;
+        ++totals_[index].count;
+    }
+
+    void SessionStats::Reset() noexcept
+    {
+        totals_.fill({});
+    }
+
+    double SessionStats::TotalXP() const noexcept
+    {
+        double total = 0.0;
+        for (const auto& entry : totals_) total += entry.xp;
+        return total;
+    }
+
+    std::uint32_t SessionStats::TotalCount() const noexcept
+    {
+        std::uint32_t total = 0;
+        for (const auto& entry : totals_) total += entry.count;
+        return total;
+    }
+
+    const SourceTotals& SessionStats::For(RewardSource source) const noexcept
+    {
+        static const SourceTotals empty{};
+        const auto index = static_cast<std::size_t>(source);
+        return index < totals_.size() ? totals_[index] : empty;
+    }
+
+    double SessionStats::Share(RewardSource source) const noexcept
+    {
+        const auto total = TotalXP();
+        return total > 0.0 ? For(source).xp / total : 0.0;
     }
 
     std::string_view ClassifyMarkerType(std::uint16_t markerType) noexcept

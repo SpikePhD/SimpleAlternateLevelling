@@ -33,10 +33,11 @@ namespace EA::XPManager {
     AwardContext MakeQuestContext(std::string_view questName, RE::FormID questID, std::string_view questType);
     AwardContext MakeStatContext(std::string_view statName, std::string_view sourceKey, int counter, std::string_view subtype = {});
 
-    // Awards XP from a structured source context. Feeds directly into the
-    // engine's native XP bucket - the engine handles level-up UI, perk points,
-    // and overflow carry.
-    void AwardXP(float amount, const AwardContext& context);
+    // Awards XP from a structured source context. The base amount is scaled
+    // by the player's level (Config::rewardScaling times the source's weight)
+    // and fed directly into the engine's native XP bucket - the engine
+    // handles level-up UI, perk points, and overflow carry.
+    void AwardXP(float baseAmount, const AwardContext& context);
 
     // Returns true only for the first completion in a quest lifecycle. Start
     // and reset signals re-arm repeatable quests without awarding XP.

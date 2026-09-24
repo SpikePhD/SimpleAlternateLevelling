@@ -134,11 +134,34 @@ namespace {
         Check(AdoptFirstValidCosave(accepted, decoded), "first valid record accepted");
         Check(!AdoptFirstValidCosave(accepted, decodedV5) && accepted == state, "duplicate valid record ignored");
     }
+
+    bool Near(double actual, double expected)
+    {
+        return std::abs(actual - expected) < 1e-9;
+    }
+
+    void TestRewardScale()
+    {
+        using EA::Progression::RewardScale;
+        const EA::Progression::LevelCurve vanilla{ 75.0f, 25.0f, 10000000.0f };
+        Check(Near(RewardScale(1, vanilla, 0.5f), 1.0), "level 1 is never scaled");
+        Check(Near(RewardScale(0, vanilla, 0.5f), 1.0), "level 0 is treated as level 1");
+        Check(Near(RewardScale(30, vanilla, 0.0f), 1.0), "exponent 0 disables scaling");
+        Check(Near(RewardScale(30, vanilla, 1.0f), 8.25), "exponent 1 tracks the curve exactly");
+        Check(Near(RewardScale(30, vanilla, 0.5f), std::sqrt(8.25)), "default exponent halves the growth");
+        Check(Near(RewardScale(30, vanilla, 2.0f), 8.25), "exponent above 1 is clamped");
+        Check(Near(RewardScale(30, vanilla, -1.0f), 1.0), "negative exponent is ignored");
+        Check(Near(RewardScale(30, vanilla, std::numeric_limits<float>::quiet_NaN()), 1.0), "NaN exponent is ignored");
+        const EA::Progression::LevelCurve capped{ 75.0f, 25.0f, 200.0f };
+        Check(Near(RewardScale(50, capped, 1.0f), 2.0), "scaling stops growing at the cap");
+        Check(Near(RewardScale(10, { 100.0f, 0.0f, 1000.0f }, 0.5f), 1.0), "flat curve never scales");
+    }
 }
 
 int main()
 {
     TestThresholds();
+    TestRewardScale();
     TestCosaves();
     if (failures == 0) {
         std::cout << "All progression tests passed.\n";

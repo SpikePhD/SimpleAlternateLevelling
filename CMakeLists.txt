@@ -94,6 +94,9 @@ if(SAL_BUILD_PLUGIN)
         src/SkillHook.cpp
         src/SkillMenu.cpp
         src/SettingsPage.cpp
+        src/InfoPages.cpp
+        src/UIText.cpp
+        src/XPJournal.cpp
         src/EventSinks.cpp
     )
 

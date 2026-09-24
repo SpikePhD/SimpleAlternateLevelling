@@ -316,6 +316,28 @@ namespace EA::Config {
         xpIncrease = validatedCurve.curve.increase;
         xpCap      = validatedCurve.curve.cap;
 
+        const auto rawScaling = ReadNumber(j, { "leveling", "reward_scaling" }, Progression::kDefaultRewardScaling);
+        const auto validatedScaling = rawScaling.invalid
+            ? UIRules::FloatValidation{ Progression::kDefaultRewardScaling, true }
+            : UIRules::ValidateFloat(rawScaling.value, Progression::kDefaultRewardScaling, 0.0f, 1.0f);
+        rewardScaling = validatedScaling.value;
+        if (rawScaling.present && validatedScaling.replaced) {
+            logger::warn("[EA] Config: leveling.reward_scaling must be from 0 through 1; using default {:.2f}.",
+                Progression::kDefaultRewardScaling);
+        }
+        for (std::size_t i = 0; i < kRewardWeightKeys.size(); ++i) {
+            const auto key = std::string(kRewardWeightKeys[i]);
+            const auto raw = ReadNumber(j, { "leveling", "reward_weights", key }, kDefaultRewardWeights[i]);
+            const auto validated = raw.invalid
+                ? UIRules::FloatValidation{ kDefaultRewardWeights[i], true }
+                : UIRules::ValidateFloat(raw.value, kDefaultRewardWeights[i], 0.0f, 4.0f);
+            rewardWeights[i] = validated.value;
+            if (raw.present && validated.replaced) {
+                logger::warn("[EA] Config: leveling.reward_weights.{} must be from 0 through 4; using default {:.2f}.",
+                    key, kDefaultRewardWeights[i]);
+            }
+        }
+
         // Skill allocation. Each present invalid value is rejected
         // independently so one typo cannot poison the others.
         const auto readInteger = [&](std::string_view key, int defaultValue, int minimum, int maximum) {
@@ -406,8 +428,10 @@ namespace EA::Config {
             locationDiscoveryRewards["default"], locationClearingRewards["default"]);
         logger::info("[EA] Config: Lock XP — novice={:.1f}, apprentice={:.1f}, adept={:.1f}, expert={:.1f}, master={:.1f}",
             xpLockNovice, xpLockApprentice, xpLockAdept, xpLockExpert, xpLockMaster);
-        logger::info("[EA] Config: Leveling — xp_base={:.1f}, xp_increase={:.1f}, xp_cap={:.1f}",
-            xpBase, xpIncrease, xpCap);
+        logger::info("[EA] Config: Leveling — xp_base={:.1f}, xp_increase={:.1f}, xp_cap={:.1f}, reward_scaling={:.2f}",
+            xpBase, xpIncrease, xpCap, rewardScaling);
+        logger::info("[EA] Config: Reward weights — quest={:.2f}, kill={:.2f}, exploration={:.2f}, lock={:.2f}, book={:.2f}, pickpocket={:.2f}",
+            rewardWeights[0], rewardWeights[1], rewardWeights[2], rewardWeights[3], rewardWeights[4], rewardWeights[5]);
         logger::info("[EA] Config: Skill allocation — points_per_level={}", skillPointsPerLevel);
         logger::info("[EA] Config: Skill cap - {:.1f}", skillCap);
         logger::info("[EA] Config: max_log_files={}", maxLogFiles);

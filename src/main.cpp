@@ -3,6 +3,8 @@
 #include "SkillHook.h"
 #include "SkillMenu.h"
 #include "SettingsPage.h"
+#include "InfoPages.h"
+#include "XPJournal.h"
 #include "SettingsModel.h"
 #include "EventSinks.h"
 #include "XPManager.h"
@@ -97,7 +99,13 @@ namespace {
 
         try {
             auto sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(logPath.string(), true);
-            auto log = std::make_shared<spdlog::logger>("EA", std::move(sink));
+            // In-memory copy of recent info-and-above lines for the in-game
+            // XP Log page; trace lines never enter it, even with verbose on.
+            auto diagnostics = std::make_shared<spdlog::sinks::ringbuffer_sink_mt>(300);
+            diagnostics->set_level(spdlog::level::info);
+            diagnostics->set_pattern("%H:%M:%S %^%l%$ %v");
+            EA::XPJournal::SetDiagnosticsSink(diagnostics);
+            auto log = std::make_shared<spdlog::logger>("EA", spdlog::sinks_init_list{ sink, diagnostics });
             const auto level = bootstrap.verbose ? spdlog::level::trace : spdlog::level::info;
             log->set_level(level);
             log->flush_on(level);
@@ -495,7 +503,9 @@ namespace {
             logger::warn("[EA] SkillMenu unavailable; vanilla level-up UI will remain active.");
         }
         // Optional: without SKSE Menu Framework, settings are edited in JSON.
-        EA::SettingsPage::Register();
+        if (EA::SettingsPage::Register()) {
+            EA::InfoPages::Register();
+        }
 
         // Keep the engine's native formula synchronized with the validated
         // configuration. The explicit threshold refresh below adds the cap.
