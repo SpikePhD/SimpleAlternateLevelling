@@ -204,4 +204,76 @@ namespace EA::UIRules {
     {
         return std::any_of(_deltas.begin(), _deltas.end(), [](auto delta) { return delta != 0; });
     }
+
+    HandoffDecision LevelUpHandoff::Begin(bool stepRegistered, bool wantsStep) noexcept
+    {
+        if (_waiting) {
+            return HandoffDecision::kAwaitStep;
+        }
+        if (!stepRegistered || !wantsStep) {
+            return HandoffDecision::kContinueNow;
+        }
+        _waiting = true;
+        _unpausedSince.reset();
+        return HandoffDecision::kAwaitStep;
+    }
+
+    bool LevelUpHandoff::Continue() noexcept
+    {
+        if (!_waiting) {
+            return false;
+        }
+        Reset();
+        return true;
+    }
+
+    bool LevelUpHandoff::ObserveSample(bool gamePaused, double nowSeconds, double graceSeconds) noexcept
+    {
+        if (!_waiting || !std::isfinite(nowSeconds)) {
+            return false;
+        }
+        if (gamePaused) {
+            _unpausedSince.reset();
+            return false;
+        }
+        if (!_unpausedSince || nowSeconds < *_unpausedSince) {
+            _unpausedSince = nowSeconds;
+        }
+        const double grace = std::isfinite(graceSeconds) && graceSeconds >= 0.0 ? graceSeconds : kDefaultGraceSeconds;
+        return nowSeconds - *_unpausedSince >= grace;
+    }
+
+    void LevelUpHandoff::Reset() noexcept
+    {
+        _waiting = false;
+        _unpausedSince.reset();
+    }
+
+    void CharacterCreatedSignal::Arm() noexcept
+    {
+        _armed = true;
+        _menuClosed = false;
+    }
+
+    void CharacterCreatedSignal::ObserveCreationMenuClosed() noexcept
+    {
+        if (_armed) {
+            _menuClosed = true;
+        }
+    }
+
+    bool CharacterCreatedSignal::TryFire(bool creationMenuOpen, bool skillsSettled) noexcept
+    {
+        if (!_armed || !_menuClosed || creationMenuOpen || !skillsSettled) {
+            return false;
+        }
+        Reset();
+        return true;
+    }
+
+    void CharacterCreatedSignal::Reset() noexcept
+    {
+        _armed = false;
+        _menuClosed = false;
+    }
 }

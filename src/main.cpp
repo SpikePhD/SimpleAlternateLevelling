@@ -11,6 +11,8 @@
 #include "Leveling.h"
 #include "Progression.h"
 #include "LogPolicy.h"
+#include "Integration.h"
+#include "UIRules.h"
 
 #include <nlohmann/json.hpp>
 #include <fstream>
@@ -165,10 +167,14 @@ namespace {
     static bool s_charCreateWatcherRegistered = false;
     static bool s_dataLoadedHandled = false;
     static std::atomic<std::uint64_t> s_lifecycleGeneration{ 1 };
+    // Armed on kNewGame; fires the integration character-created callback
+    // once. Never persisted, so loaded saves never fire it.
+    static EA::UIRules::CharacterCreatedSignal s_characterCreated;
 
     static void InvalidateDeferredLifecycleWork() {
         s_lifecycleGeneration.fetch_add(1);
         s_normalizeTaskQueued = false;
+        s_characterCreated.Reset();
         EA::SkillMenu::ResetState();
         EA::Leveling::ResetState();
     }
@@ -283,6 +289,40 @@ namespace {
         logger::info("[EA] Starting skills applied once (mode={}).", static_cast<int>(s_startingMode));
     }
 
+    // Starting skills are settled once normalization has run (or was
+    // attempted and is no longer pending), or immediately in Vanilla mode.
+    static bool StartingSkillsSettled() {
+        return s_startingMode == EA::Config::StartingSkillsMode::Vanilla || s_skillsNormalized ||
+               (!s_awaitingCharCreate && !s_normalizeTaskQueued);
+    }
+
+    static void TryNotifyCharacterCreated() {
+        if (s_characterCreated.TryFire(IsCreationMenuOpen(), StartingSkillsSettled())) {
+            logger::info("[EA] Character creation complete (starting skills mode={}).",
+                static_cast<int>(s_startingMode));
+            EA::Integration::NotifyCharacterCreated();
+        }
+    }
+
+    // A creation menu reports its close before it has fully closed, so the
+    // check runs a frame later. If another creation menu is still open, the
+    // next close event retries.
+    static void QueueCharacterCreatedCheck() {
+        auto* tasks = SKSE::GetTaskInterface();
+        if (!tasks) {
+            TryNotifyCharacterCreated();
+            return;
+        }
+        const auto generation = s_lifecycleGeneration.load();
+        tasks->AddTask([generation]() {
+            if (s_lifecycleGeneration.load() != generation) {
+                logger::debug("[EA] Character-created check: stale deferred task discarded.");
+                return;
+            }
+            TryNotifyCharacterCreated();
+        });
+    }
+
     static void QueueNormalizeSkillsWhenReady() {
         if (s_startingMode == EA::Config::StartingSkillsMode::Vanilla || !s_awaitingCharCreate || s_skillsNormalized || s_normalizeTaskQueued) {
             return;
@@ -314,25 +354,33 @@ namespace {
             s_awaitingCharCreate = false;
             logger::info("[EA] RaceSex/RaceMenu closed on new game - normalizing skills now.");
             NormalizeSkills();
+            TryNotifyCharacterCreated();
         });
     }
 
-    // Watches for RaceMenu closing on a new game and queues NormalizeSkills.
-    // s_awaitingCharCreate is set on kNewGame and is the primary guard against
-    // mid-game showracemenu calls. s_skillsNormalized is the secondary guard
-    // against re-entry on subsequent loads of the same character.
+    // Watches for RaceMenu closing on a new game, queues NormalizeSkills and
+    // the integration character-created check. s_awaitingCharCreate and the
+    // character-created signal are armed only on kNewGame, the primary guard
+    // against mid-game showracemenu calls. s_skillsNormalized is the
+    // secondary guard against re-entry on subsequent loads of the same
+    // character.
     struct CharCreateWatcher : public RE::BSTEventSink<RE::MenuOpenCloseEvent> {
         RE::BSEventNotifyControl ProcessEvent(
             const RE::MenuOpenCloseEvent*              event,
             RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
         {
-            if (s_startingMode == EA::Config::StartingSkillsMode::Vanilla) return RE::BSEventNotifyControl::kContinue;
             if (!event) return RE::BSEventNotifyControl::kContinue;
 
             // Support both vanilla ("RaceSex Menu") and modded ("RaceMenu") installs.
             if (event->opening ||
                 (event->menuName != "RaceSex Menu" && event->menuName != "RaceMenu"))
                 return RE::BSEventNotifyControl::kContinue;
+
+            if (s_characterCreated.Armed()) {
+                s_characterCreated.ObserveCreationMenuClosed();
+                QueueCharacterCreatedCheck();
+            }
+            if (s_startingMode == EA::Config::StartingSkillsMode::Vanilla) return RE::BSEventNotifyControl::kContinue;
 
             if (s_awaitingCharCreate && !s_skillsNormalized) {
                 logger::info("[EA] Menu '{}' closed during character creation - checking whether skills can be normalized.",
@@ -572,6 +620,9 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse) {
             logger::warn("[EA] SKSE messaging callback received a null message.");
             return;
         }
+        if (msg->type == SKSE::MessagingInterface::kPostPostLoad) {
+            EA::Integration::Broadcast();
+        }
         if (msg->type == SKSE::MessagingInterface::kDataLoaded) {
             OnDataLoaded();
         }
@@ -586,6 +637,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse) {
             s_startingMode = EA::Config::startingSkillsMode;
             s_startingUniformValue = EA::Config::startingSkillsUniformValue;
             s_startingCustom = EA::Config::startingSkillsCustom;
+            s_characterCreated.Arm();
             logger::info("[EA] kNewGame: awaiting RaceMenu close to normalize skills.");
             EA::Leveling::QueueThresholdRefresh(1, "new-game");
             QueueNormalizeSkillsWhenReady();

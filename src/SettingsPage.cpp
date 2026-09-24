@@ -530,7 +530,8 @@ namespace EA::SettingsPage {
             DrawSection("$SAL_SECTION_ALLOCATION", SettingSection::Allocation, {
                 "skill_allocation.points_per_level", "skill_allocation.skill_cap" });
             DrawSection("$SAL_SECTION_NOTIFICATIONS", SettingSection::Notifications, { "notifications.enabled" });
-            DrawSection("$SAL_SECTION_ADVANCED", SettingSection::Advanced, { "debug.verbose", "debug.max_log_files" });
+            DrawSection("$SAL_SECTION_ADVANCED", SettingSection::Advanced, {
+                "integration.threshold_multiplier_floor", "debug.verbose", "debug.max_log_files" });
         }
     }
 

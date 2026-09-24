@@ -531,6 +531,8 @@ namespace EA::EventSinks {
             // current threshold from native XP only when the LevelUp Menu
             // completes; changing it now makes that subtraction use the next
             // level's value (120 XP at threshold 100 became -5, not 20).
+            // Integration refresh requests are folded until then too.
+            Leveling::MarkLevelIncrease();
             logger::info("[EA] Level increase to {}; threshold refresh deferred until the LevelUp Menu closes.",
                 event->newLevel);
             return RE::BSEventNotifyControl::kContinue;
@@ -539,7 +541,9 @@ namespace EA::EventSinks {
 
     // Applies the capped threshold after the engine has finished the level-up
     // (XP overflow carried and its own threshold recalculated). The interim
-    // close of an intercepted LevelUp Menu is skipped.
+    // close of an intercepted LevelUp Menu is skipped. SkillMenu keeps
+    // deferring while an integration level-up step runs, so only the close of
+    // the vanilla menu it finally reopens refreshes the threshold.
     struct OnLevelUpMenu : public RE::BSTEventSink<RE::MenuOpenCloseEvent> {
         RE::BSEventNotifyControl ProcessEvent(
             const RE::MenuOpenCloseEvent*                  event,
@@ -555,6 +559,7 @@ namespace EA::EventSinks {
 
             auto* player = RE::PlayerCharacter::GetSingleton();
             const auto level = player ? static_cast<std::uint32_t>(player->GetLevel()) : 0u;
+            Leveling::MarkLevelUpFinished();
             Leveling::QueueThresholdRefresh(level, "level-up-menu-closed");
             return RE::BSEventNotifyControl::kContinue;
         }

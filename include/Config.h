@@ -99,6 +99,11 @@ namespace EA::Config {
     inline constexpr std::array<float, 6> kDefaultRewardWeights{ 0.6f, 1.5f, 1.0f, 1.0f, 1.0f, 1.0f };
     inline std::array<float, 6> rewardWeights = kDefaultRewardWeights;
 
+    // Lowest integration threshold multiplier SAL accepts (see
+    // Progression::ApplyThresholdMultiplier). Range (0, 1].
+    inline constexpr float kDefaultThresholdMultiplierFloor = 0.5f;
+    inline float thresholdMultiplierFloor = kDefaultThresholdMultiplierFloor;
+
     // Skill allocation
     inline constexpr int   kDefaultSkillPointsPerLevel = 10;
     inline constexpr float kDefaultSkillCap = 200.0f;

@@ -1,0 +1,152 @@
+#include "PCH.h"
+#include "Integration.h"
+
+#include "Leveling.h"
+#include "SAL_API.h"
+#include "SkillMenu.h"
+
+#include <atomic>
+#include <limits>
+
+namespace EA::Integration {
+    namespace {
+        using MultiplierProvider = float (*)();
+        using LevelUpStep = bool (*)(std::uint32_t);
+        using CharacterCreatedCallback = void (*)();
+
+        std::atomic<MultiplierProvider>       s_multiplierProvider{ nullptr };
+        std::atomic<LevelUpStep>              s_levelUpStep{ nullptr };
+        std::atomic<CharacterCreatedCallback> s_characterCreated{ nullptr };
+        bool                                  s_broadcast{ false };
+
+        // V1 allows one registrant per slot; the first valid one wins.
+        template <class Callback>
+        bool RegisterSlot(std::atomic<Callback>& slot, Callback callback, std::string_view name)
+        {
+            if (!callback) {
+                logger::warn("[EA] Integration: rejected null {} registration.", name);
+                return false;
+            }
+            Callback expected = nullptr;
+            if (!slot.compare_exchange_strong(expected, callback)) {
+                logger::warn("[EA] Integration: rejected second {} registration; V1 allows one registrant.", name);
+                return false;
+            }
+            logger::info("[EA] Integration: {} registered.", name);
+            return true;
+        }
+
+        bool RegisterThresholdMultiplierApi(MultiplierProvider provider)
+        {
+            return RegisterSlot(s_multiplierProvider, provider, "threshold multiplier");
+        }
+
+        void RequestThresholdRefreshApi()
+        {
+            Leveling::RequestIntegrationRefresh();
+        }
+
+        bool RegisterLevelUpStepApi(LevelUpStep wantsStep)
+        {
+            return RegisterSlot(s_levelUpStep, wantsStep, "level-up step");
+        }
+
+        void ContinueLevelUpApi()
+        {
+            SkillMenu::RequestContinueLevelUp();
+        }
+
+        bool RegisterCharacterCreatedApi(CharacterCreatedCallback callback)
+        {
+            return RegisterSlot(s_characterCreated, callback, "character-created callback");
+        }
+
+        SAL::SALInterfaceV1 s_interface{
+            SAL::kInterfaceVersion1,
+            RegisterThresholdMultiplierApi,
+            RequestThresholdRefreshApi,
+            RegisterLevelUpStepApi,
+            ContinueLevelUpApi,
+            RegisterCharacterCreatedApi
+        };
+    }
+
+    void Broadcast()
+    {
+        if (s_broadcast) {
+            logger::debug("[EA] Integration: interface already broadcast.");
+            return;
+        }
+        auto* messaging = SKSE::GetMessagingInterface();
+        if (!messaging) {
+            logger::error("[EA] Integration: MessagingInterface unavailable; integration API not broadcast.");
+            return;
+        }
+        s_broadcast = true;
+        // SKSE reports false when no plugin listens, which is normal without a
+        // companion. Call the raw dispatcher so CommonLib's wrapper does not
+        // log that as a warning.
+        const auto& raw = reinterpret_cast<const SKSE::Impl::SKSEMessagingInterface&>(*messaging);
+        if (!raw.Dispatch(SKSE::GetPluginHandle(), SAL::kMessageInterface, &s_interface,
+                static_cast<std::uint32_t>(sizeof(s_interface)), nullptr)) {
+            logger::info("[EA] Integration: interface V{} broadcast; no companion plugin is listening.",
+                s_interface.version);
+            return;
+        }
+        logger::info("[EA] Integration: interface V{} broadcast to listeners of '{}'.",
+            s_interface.version, SAL::kSenderName);
+    }
+
+    bool HasThresholdMultiplier()
+    {
+        return s_multiplierProvider.load() != nullptr;
+    }
+
+    float ThresholdMultiplier()
+    {
+        const auto provider = s_multiplierProvider.load();
+        if (!provider) {
+            return 1.0f;
+        }
+        try {
+            return provider();
+        } catch (...) {
+            logger::error("[EA] Integration: threshold multiplier provider threw; ignoring it.");
+            return std::numeric_limits<float>::quiet_NaN();
+        }
+    }
+
+    bool HasLevelUpStep()
+    {
+        return s_levelUpStep.load() != nullptr;
+    }
+
+    bool WantsLevelUpStep(std::uint32_t level)
+    {
+        const auto step = s_levelUpStep.load();
+        if (!step) {
+            return false;
+        }
+        try {
+            return step(level);
+        } catch (...) {
+            logger::error("[EA] Integration: level-up step threw for level {}; continuing without it.", level);
+            return false;
+        }
+    }
+
+    void NotifyCharacterCreated()
+    {
+        const auto callback = s_characterCreated.load();
+        if (!callback) {
+            logger::debug("[EA] Integration: character created; no callback registered.");
+            return;
+        }
+        logger::info("[EA] Integration: notifying character-created callback.");
+        try {
+            callback();
+        } catch (...) {
+            logger::error("[EA] Integration: character-created callback threw.");
+        }
+    }
+}

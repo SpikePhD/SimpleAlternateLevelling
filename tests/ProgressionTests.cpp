@@ -62,6 +62,40 @@ namespace {
         Check(validated.curve.cap == 1000.0f && validated.replacedCap, "invalid cap falls back");
     }
 
+    void TestThresholdMultiplier()
+    {
+        using namespace EA::Progression;
+        constexpr float nan = std::numeric_limits<float>::quiet_NaN();
+        constexpr float inf = std::numeric_limits<float>::infinity();
+
+        auto neutral = ApplyThresholdMultiplier(200.0f, 1.0f, 0.5f);
+        Check(neutral.threshold == 200.0f && neutral.multiplier == 1.0 && !neutral.rejected && !neutral.clamped,
+            "multiplier 1 leaves the threshold unchanged");
+        auto reduced = ApplyThresholdMultiplier(200.0f, 0.8f, 0.5f);
+        Check(std::fabs(reduced.threshold - 160.0f) < 0.01f && !reduced.clamped, "multiplier inside range applies");
+        auto floored = ApplyThresholdMultiplier(200.0f, 0.1f, 0.5f);
+        Check(floored.threshold == 100.0f && floored.multiplier == 0.5 && floored.clamped,
+            "multiplier below floor is clamped to floor");
+        auto raised = ApplyThresholdMultiplier(200.0f, 3.0f, 0.5f);
+        Check(raised.threshold == 200.0f && raised.multiplier == 1.0 && raised.clamped,
+            "multiplier above 1 is clamped to 1");
+        for (const float bad : { nan, inf, -inf, 0.0f, -0.5f }) {
+            auto result = ApplyThresholdMultiplier(200.0f, bad, 0.5f);
+            Check(result.threshold == 200.0f && result.multiplier == 1.0 && result.rejected,
+                "non-finite or non-positive multiplier is ignored");
+        }
+        Check(ApplyThresholdMultiplier(200.0f, 0.1f, 1.0f).threshold == 200.0f, "floor 1 disables reductions");
+        for (const float badFloor : { nan, inf, 0.0f, -1.0f, 1.5f }) {
+            Check(ValidateMultiplierFloor(badFloor) == kDefaultThresholdMultiplierFloor,
+                "invalid floor falls back to the default");
+            Check(ApplyThresholdMultiplier(200.0f, 0.1f, badFloor).threshold == 100.0f,
+                "invalid floor clamps with the default");
+        }
+        Check(ValidateMultiplierFloor(0.25f) == 0.25f, "valid floor is kept");
+        Check(ApplyThresholdMultiplier(std::numeric_limits<float>::max(), 0.5f, 0.5f).threshold > 0.0f,
+            "large thresholds stay finite");
+    }
+
     void TestCosaves()
     {
         using namespace EA::Progression;
@@ -162,6 +196,7 @@ int main()
 {
     TestThresholds();
     TestRewardScale();
+    TestThresholdMultiplier();
     TestCosaves();
     if (failures == 0) {
         std::cout << "All progression tests passed.\n";

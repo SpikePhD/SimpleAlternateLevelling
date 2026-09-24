@@ -9,6 +9,11 @@
     "_comment_max_log_files": "Maximum number of session logs to keep in the standard SKSE log directory (0 keeps all; valid range 0-1000)."
   },
 
+  "integration": {
+    "threshold_multiplier_floor": 0.5,
+    "_comment_threshold_multiplier_floor": "Lowest multiplier a companion plugin may apply to the XP needed per level (valid range 0.05-1; 1 disables reductions). Has no effect without a companion plugin."
+  },
+
   "xp_sources": {
     "_comment": "XP awarded per action. All values are floats.",
 

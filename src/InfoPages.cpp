@@ -2,6 +2,7 @@
 #include "InfoPages.h"
 
 #include "Config.h"
+#include "Leveling.h"
 #include "Progression.h"
 #include "RewardRules.h"
 #include "UIText.h"
@@ -98,6 +99,14 @@ namespace EA::InfoPages {
                 overlay.c_str());
             const double remaining = std::max(0.0, threshold - xp);
             ImGui::Text("%s: %.0f XP", T("$SAL_STATS_REMAINING").c_str(), remaining);
+            // The bar shows the effective threshold; name the integration
+            // modifier when one shortened it.
+            const auto applied = Leveling::LastApplied();
+            if (applied.multiplier < 1.0 && applied.configured > 0.0f) {
+                ImGui::TextColored(kGold, "%s", UIText::Format(T("$SAL_STATS_MODIFIER"), {
+                    { "multiplier", std::format("{:.2f}", applied.multiplier) },
+                    { "configured", std::format("{:.0f}", applied.configured) } }).c_str());
+            }
 
             const double perKill = Config::xpKillHumanoid * Config::xpKillGlobalMultiplier * ScaleFor(RewardSource::kKill, level);
             const double perQuest = Config::xpQuestSide * ScaleFor(RewardSource::kQuest, level);

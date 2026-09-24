@@ -338,6 +338,17 @@ namespace EA::Config {
             }
         }
 
+        const auto rawFloor = ReadNumber(j, { "integration", "threshold_multiplier_floor" },
+            kDefaultThresholdMultiplierFloor);
+        const auto validatedFloor = rawFloor.invalid
+            ? UIRules::FloatValidation{ kDefaultThresholdMultiplierFloor, true }
+            : UIRules::ValidateFloat(rawFloor.value, kDefaultThresholdMultiplierFloor, 0.05f, 1.0f);
+        thresholdMultiplierFloor = validatedFloor.value;
+        if (rawFloor.present && validatedFloor.replaced) {
+            logger::warn("[EA] Config: integration.threshold_multiplier_floor must be from 0.05 through 1; using default {:.2f}.",
+                kDefaultThresholdMultiplierFloor);
+        }
+
         // Skill allocation. Each present invalid value is rejected
         // independently so one typo cannot poison the others.
         const auto readInteger = [&](std::string_view key, int defaultValue, int minimum, int maximum) {
@@ -432,6 +443,7 @@ namespace EA::Config {
             xpBase, xpIncrease, xpCap, rewardScaling);
         logger::info("[EA] Config: Reward weights — quest={:.2f}, kill={:.2f}, exploration={:.2f}, lock={:.2f}, book={:.2f}, pickpocket={:.2f}",
             rewardWeights[0], rewardWeights[1], rewardWeights[2], rewardWeights[3], rewardWeights[4], rewardWeights[5]);
+        logger::info("[EA] Config: Integration — threshold_multiplier_floor={:.2f}", thresholdMultiplierFloor);
         logger::info("[EA] Config: Skill allocation — points_per_level={}", skillPointsPerLevel);
         logger::info("[EA] Config: Skill cap - {:.1f}", skillCap);
         logger::info("[EA] Config: max_log_files={}", maxLogFiles);

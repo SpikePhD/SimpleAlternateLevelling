@@ -127,6 +127,10 @@ namespace EA {
                 } else if (key == "skill_allocation.skill_cap") {
                     descriptor.minimum = 1;
                     descriptor.maximum = 1000;
+                } else if (key == "integration.threshold_multiplier_floor") {
+                    descriptor.minimum = 0.05;
+                    descriptor.maximum = 1;
+                    descriptor.step = 0.05;
                 } else if (key == "debug.max_log_files") {
                     descriptor.maximum = 1000;
                 } else if (key.starts_with("xp_sources.")) {

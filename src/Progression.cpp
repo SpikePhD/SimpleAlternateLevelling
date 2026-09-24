@@ -98,6 +98,31 @@ namespace EA::Progression {
         return std::isfinite(scale) && scale > 0.0 ? scale : 1.0;
     }
 
+    float ValidateMultiplierFloor(float floor) noexcept
+    {
+        return std::isfinite(floor) && floor > 0.0f && floor <= 1.0f ? floor : kDefaultThresholdMultiplierFloor;
+    }
+
+    ThresholdModifier ApplyThresholdMultiplier(float threshold, float providerValue, float floor) noexcept
+    {
+        ThresholdModifier result{ threshold, 1.0 };
+        if (!std::isfinite(providerValue) || providerValue <= 0.0f) {
+            result.rejected = true;
+            return result;
+        }
+        const double lower = ValidateMultiplierFloor(floor);
+        const double clamped = std::clamp(static_cast<double>(providerValue), lower, 1.0);
+        result.clamped = clamped != static_cast<double>(providerValue);
+        const double scaled = static_cast<double>(threshold) * clamped;
+        if (!std::isfinite(scaled) || scaled <= 0.0) {
+            result.rejected = true;
+            return result;
+        }
+        result.multiplier = clamped;
+        result.threshold = static_cast<float>(scaled);
+        return result;
+    }
+
     std::array<std::byte, kCosaveV6Size> EncodeCosaveV6(const CosaveState& state) noexcept
     {
         std::array<std::byte, kCosaveV6Size> encoded{};

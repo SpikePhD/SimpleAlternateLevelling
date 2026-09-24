@@ -18,6 +18,7 @@ EXPECTED = {
     ("leveling", "reward_scaling"): 0.5,
     ("leveling", "reward_weights", "quest"): 0.6,
     ("leveling", "reward_weights", "kill"): 1.5,
+    ("integration", "threshold_multiplier_floor"): 0.5,
 }
 
 

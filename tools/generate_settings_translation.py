@@ -46,6 +46,7 @@ FIXED = {
     "$SAL_PAGE_LOG": "XP Log",
     "$SAL_STATS_THIS_LEVEL": "This level",
     "$SAL_STATS_REMAINING": "XP to next level",
+    "$SAL_STATS_MODIFIER": "A companion mod changes XP needed per level: x{multiplier} ({configured} XP without it).",
     "$SAL_STATS_ESTIMATE": "About {kills} same-level humanoid kills or {quests} side quests to the next level.",
     "$SAL_STATS_MULTIPLIERS": "Reward multipliers at your level",
     "$SAL_STATS_SESSION": "This session",
@@ -169,6 +170,7 @@ LABELS = {
     "skill_allocation.points_per_level": "Skill points per level",
     "skill_allocation.skill_cap": "Skill level cap",
     "notifications.enabled": "Show XP notifications",
+    "integration.threshold_multiplier_floor": "Lowest XP-per-level multiplier from companion mods",
     "debug.verbose": "Verbose logging",
     "debug.max_log_files": "Log files to keep (0 keeps all)",
 }
@@ -193,6 +195,7 @@ DESCRIPTIONS = {
     "starting_skills.mode": "How skills are set when a new character leaves character creation.",
     "skill_allocation.points_per_level": "Points to distribute at each level-up. Unspent points carry over.",
     "skill_allocation.skill_cap": "Highest level a skill can reach through allocation.",
+    "integration.threshold_multiplier_floor": "Companion mods that use SAL's integration API may lower the XP needed per level. They can never go below this fraction of the normal value. 1 turns reductions off. Has no effect without such a mod.",
     "debug.verbose": "Writes detailed diagnostics to the SKSE log. Leave off for normal play.",
     "debug.max_log_files": "Takes effect the next time the game starts.",
 }

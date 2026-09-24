@@ -131,5 +131,19 @@ int main(int argc, char** argv)
     assert(legacyFloat.Load(defaults, {{"debug", {{"max_log_files", 20.0}}}}));
     assert(legacyFloat.Effective()["debug"]["max_log_files"].is_number_integer());
     assert(legacyFloat.Effective()["debug"]["max_log_files"] == 20);
+
+    // Integration floor: Advanced section, bounded to (0, 1].
+    SettingsModel integration;
+    assert(integration.Load(defaults, Json::object()));
+    const auto floorIndex = Index(integration, "integration.threshold_multiplier_floor");
+    assert(integration.Registry()[floorIndex].section == EA::SettingSection::Advanced);
+    assert(integration.Effective()["integration"]["threshold_multiplier_floor"] ==
+           EA::Progression::kDefaultThresholdMultiplierFloor);
+    integration.Begin();
+    assert(integration.Set(floorIndex, 0.75));
+    assert(integration.Set(floorIndex, 1.0));
+    assert(!integration.Set(floorIndex, 0.0));
+    assert(!integration.Set(floorIndex, 1.5));
+    assert(integration.Overrides()["integration"]["threshold_multiplier_floor"] == 1.0);
     std::cout << "settings model tests passed\n";
 }

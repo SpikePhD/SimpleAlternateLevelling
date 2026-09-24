@@ -91,6 +91,7 @@ if(SAL_BUILD_PLUGIN)
         src/LogPolicy.cpp
         src/UIRules.cpp
         src/Leveling.cpp
+        src/Integration.cpp
         src/SkillHook.cpp
         src/SkillMenu.cpp
         src/SettingsPage.cpp

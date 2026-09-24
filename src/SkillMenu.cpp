@@ -2,6 +2,7 @@
 #include "SkillMenu.h"
 
 #include "Config.h"
+#include "Integration.h"
 #include "UIRules.h"
 #include "XPManager.h"
 
@@ -9,9 +10,12 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <string>
+#include <system_error>
+#include <thread>
 
 namespace EA::SkillMenu {
     namespace {
@@ -56,8 +60,12 @@ namespace EA::SkillMenu {
 
         constexpr auto kActorValueWhitelist = MakeActorValueWhitelist();
 
+        constexpr auto kContinuationSampleInterval = std::chrono::milliseconds(250);
+
         UIRules::AllocationSession s_session;
+        UIRules::LevelUpHandoff     s_handoff;
         std::atomic<std::uint64_t>  s_generation{ 1 };
+        std::atomic<std::uint64_t>  s_continuationWatch{ 0 };
         RE::GFxMovieView*           s_activeMovie{ nullptr };
         bool                        s_registered{ false };
         bool                        s_deferredLevelUp{ false };
@@ -134,6 +142,78 @@ namespace EA::SkillMenu {
             logger::info("[EA] SkillMenu: vanilla LevelUp Menu queued once (reason={}).", reason);
         }
 
+        void ContinueFromStep(std::string_view reason)
+        {
+            if (!s_handoff.Continue()) {
+                logger::debug("[EA] SkillMenu: continuation ignored; no level-up step is waiting (reason={}).", reason);
+                return;
+            }
+            s_continuationWatch.fetch_add(1);
+            logger::info("[EA] SkillMenu: level-up step finished (reason={}).", reason);
+            QueueVanillaContinuation(reason);
+        }
+
+        // Runs on the main thread for each fail-safe sample while a level-up
+        // step is waiting.
+        void SampleContinuation(std::uint64_t watch, std::uint64_t generation)
+        {
+            if (s_continuationWatch.load() != watch || s_generation.load() != generation || !s_handoff.Waiting()) {
+                return;
+            }
+            auto* ui = RE::UI::GetSingleton();
+            const bool paused = ui && ui->GameIsPaused();
+            const double now = std::chrono::duration<double>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+            if (!s_handoff.ObserveSample(paused, now)) {
+                return;
+            }
+            logger::warn("[EA] SkillMenu: level-up step did not call ContinueLevelUp within {:.0f}s of unpaused play; continuing.",
+                UIRules::LevelUpHandoff::kDefaultGraceSeconds);
+            ContinueFromStep("continuation-fail-safe");
+        }
+
+        // A background ticker posts one sample task per interval; it stops as
+        // soon as the wait ends or lifecycle state is invalidated.
+        void StartContinuationWatch()
+        {
+            const auto watch = s_continuationWatch.fetch_add(1) + 1;
+            const auto generation = s_generation.load();
+            try {
+                std::thread([watch, generation]() {
+                    while (s_continuationWatch.load() == watch && s_generation.load() == generation) {
+                        std::this_thread::sleep_for(kContinuationSampleInterval);
+                        auto* tasks = SKSE::GetTaskInterface();
+                        if (!tasks) {
+                            return;
+                        }
+                        tasks->AddTask([watch, generation]() { SampleContinuation(watch, generation); });
+                    }
+                }).detach();
+            } catch (const std::system_error& error) {
+                logger::warn("[EA] SkillMenu: continuation fail-safe unavailable: {}.", error.what());
+            }
+        }
+
+        // Every path that ends SAL's part of a level-up comes through here:
+        // a registered integration step may run before the vanilla menu.
+        void HandOffOrContinue(std::string_view reason)
+        {
+            if (!s_deferredLevelUp || s_vanillaContinuationQueued || s_handoff.Waiting()) {
+                return;
+            }
+            const bool registered = Integration::HasLevelUpStep();
+            auto* player = RE::PlayerCharacter::GetSingleton();
+            const auto level = player ? static_cast<std::uint32_t>(player->GetLevel()) : 0u;
+            const bool wantsStep = registered && Integration::WantsLevelUpStep(level);
+            if (s_handoff.Begin(registered, wantsStep) == UIRules::HandoffDecision::kAwaitStep) {
+                logger::info("[EA] SkillMenu: waiting for integration level-up step at level {} (reason={}).",
+                    level, reason);
+                StartContinuationWatch();
+                return;
+            }
+            QueueVanillaContinuation(reason);
+        }
+
         void CloseCustomAndContinue(std::string_view reason)
         {
             s_session.MarkClosing();
@@ -145,7 +225,7 @@ namespace EA::SkillMenu {
             } else {
                 logger::warn("[EA] SkillMenu: UIMessageQueue unavailable while closing custom menu.");
             }
-            QueueVanillaContinuation(reason);
+            HandOffOrContinue(reason);
         }
 
         void PreserveAllAndContinue(std::string_view reason)
@@ -403,6 +483,14 @@ namespace EA::SkillMenu {
                 if (event->menuName != RE::LevelUpMenu::MENU_NAME || !event->opening) {
                     return RE::BSEventNotifyControl::kContinue;
                 }
+                if (s_handoff.Waiting()) {
+                    // Something else opened the vanilla menu while a step
+                    // was pending; treat it as the continuation.
+                    logger::warn("[EA] SkillMenu: vanilla LevelUp Menu opened while a level-up step was waiting; ending the wait.");
+                    s_handoff.Reset();
+                    s_continuationWatch.fetch_add(1);
+                    s_allowVanillaLevelUp = true;
+                }
                 if (s_allowVanillaLevelUp) {
                     s_allowVanillaLevelUp = false;
                     s_vanillaContinuationQueued = false;
@@ -475,12 +563,12 @@ namespace EA::SkillMenu {
             logger::error("[EA] SkillMenu: pending points plus level grant overflowed; preserving pending={} and continuing vanilla.",
                 s_pendingCarryOver);
             s_session.Cancel();
-            QueueVanillaContinuation("point-total-overflow");
+            HandOffOrContinue("point-total-overflow");
             return;
         }
         if (*total == 0) {
             s_session.Cancel();
-            QueueVanillaContinuation("no-points");
+            HandOffOrContinue("no-points");
             return;
         }
 
@@ -489,7 +577,7 @@ namespace EA::SkillMenu {
         if (!ReadCurrentSkillValues(snapshot, owner) || !s_session.Begin(*total, Config::skillCap, snapshot)) {
             logger::warn("[EA] SkillMenu: unable to start a safe allocation session.");
             s_session.Cancel();
-            QueueVanillaContinuation("invalid-session-input");
+            HandOffOrContinue("invalid-session-input");
             return;
         }
         auto* queue = RE::UIMessageQueue::GetSingleton();
@@ -592,10 +680,34 @@ namespace EA::SkillMenu {
         return s_deferredLevelUp;
     }
 
+    void ContinueLevelUp()
+    {
+        ContinueFromStep("integration-continue");
+    }
+
+    void RequestContinueLevelUp()
+    {
+        const auto generation = s_generation.load();
+        auto* tasks = SKSE::GetTaskInterface();
+        if (!tasks) {
+            logger::warn("[EA] SkillMenu: TaskInterface unavailable; ContinueLevelUp request dropped.");
+            return;
+        }
+        tasks->AddTask([generation]() {
+            if (s_generation.load() != generation) {
+                logger::debug("[EA] SkillMenu: stale ContinueLevelUp request discarded.");
+                return;
+            }
+            ContinueLevelUp();
+        });
+    }
+
     void ResetState()
     {
         s_generation.fetch_add(1);
         s_session.Cancel();
+        s_handoff.Reset();
+        s_continuationWatch.fetch_add(1);
         s_activeMovie = nullptr;
         s_deferredLevelUp = false;
         s_allowVanillaLevelUp = false;

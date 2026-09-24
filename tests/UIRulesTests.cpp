@@ -1,3 +1,7 @@
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
+
 #include "UIRules.h"
 
 #include <array>
@@ -116,5 +120,65 @@ int main()
     levels[4] = std::numeric_limits<float>::quiet_NaN();
     assert(!session.Begin(1, 200.0f, levels));
     assert(session.State() == SessionState::kIdle);
+
+    // Level-up step hand-off.
+    LevelUpHandoff handoff;
+    assert(handoff.Begin(false, true) == HandoffDecision::kContinueNow);
+    assert(handoff.Begin(true, false) == HandoffDecision::kContinueNow);
+    assert(!handoff.Waiting());
+    assert(!handoff.Continue());
+    assert(handoff.Begin(true, true) == HandoffDecision::kAwaitStep);
+    assert(handoff.Waiting());
+    assert(handoff.Begin(true, false) == HandoffDecision::kAwaitStep);
+    assert(handoff.Continue());
+    assert(!handoff.Continue());
+    assert(!handoff.Waiting());
+
+    assert(handoff.Begin(true, true) == HandoffDecision::kAwaitStep);
+    handoff.Reset();
+    assert(!handoff.Waiting());
+    assert(!handoff.Continue());
+
+    // Fail-safe: only continuous unpaused time counts.
+    assert(!handoff.ObserveSample(false, 0.0, 10.0));
+    assert(handoff.Begin(true, true) == HandoffDecision::kAwaitStep);
+    assert(!handoff.ObserveSample(true, 0.0, 10.0));
+    assert(!handoff.ObserveSample(true, 100.0, 10.0));
+    assert(!handoff.ObserveSample(false, 100.0, 10.0));
+    assert(!handoff.ObserveSample(false, 109.0, 10.0));
+    assert(!handoff.ObserveSample(true, 109.5, 10.0));
+    assert(!handoff.ObserveSample(false, 110.0, 10.0));
+    assert(!handoff.ObserveSample(false, 119.9, 10.0));
+    assert(handoff.ObserveSample(false, 120.0, 10.0));
+    assert(handoff.Waiting());
+    assert(handoff.Continue());
+    assert(!handoff.ObserveSample(false, 500.0, 10.0));
+    assert(handoff.Begin(true, true) == HandoffDecision::kAwaitStep);
+    assert(!handoff.ObserveSample(false, std::nan(""), 10.0));
+    assert(!handoff.ObserveSample(false, 1.0, std::nan("")));
+    assert(handoff.ObserveSample(false, 1.0 + LevelUpHandoff::kDefaultGraceSeconds, std::nan("")));
+    handoff.Reset();
+
+    // Character-created callback.
+    CharacterCreatedSignal created;
+    created.ObserveCreationMenuClosed();
+    assert(!created.TryFire(false, true));
+    created.Arm();
+    assert(created.Armed());
+    assert(!created.TryFire(false, true));
+    created.ObserveCreationMenuClosed();
+    assert(!created.TryFire(true, true));
+    assert(!created.TryFire(false, false));
+    assert(created.TryFire(false, true));
+    assert(!created.Armed());
+    assert(!created.TryFire(false, true));
+    created.ObserveCreationMenuClosed();
+    assert(!created.TryFire(false, true));
+    created.Arm();
+    created.ObserveCreationMenuClosed();
+    created.Reset();
+    assert(!created.TryFire(false, true));
+    created.Arm();
+    assert(!created.CreationMenuClosed());
     return 0;
 }

@@ -36,6 +36,23 @@ namespace EA::Progression {
     inline constexpr float kDefaultRewardScaling = 0.5f;
     [[nodiscard]] double RewardScale(std::uint32_t level, LevelCurve curve, float exponent) noexcept;
 
+    // Integration multiplier applied to the live threshold only; reward
+    // scaling keeps using the unmodified curve. A non-finite or non-positive
+    // provider value counts as 1, and the result is clamped to [floor, 1].
+    // A floor outside (0, 1] falls back to the default.
+    inline constexpr float kDefaultThresholdMultiplierFloor = 0.5f;
+
+    struct ThresholdModifier {
+        float  threshold;
+        double multiplier;
+        bool   rejected{ false };  // provider value was non-finite or <= 0
+        bool   clamped{ false };   // provider value was outside [floor, 1]
+    };
+
+    [[nodiscard]] float ValidateMultiplierFloor(float floor) noexcept;
+    [[nodiscard]] ThresholdModifier ApplyThresholdMultiplier(
+        float threshold, float providerValue, float floor) noexcept;
+
     struct CosaveState {
         std::int32_t pendingSkillPoints{ 0 };
         bool         skillsNormalized{ false };

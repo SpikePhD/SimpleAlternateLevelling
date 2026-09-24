@@ -17,6 +17,9 @@ SKSEPluginLoad()
 ├── Config::Load()           - reads SimpleAlternateLevelling.json immediately
 ├── Serialization callbacks  - cosave v6: persists pendingSkillPoints + skillsNormalized;
 │                              native PlayerSkills::xp remains owned by Skyrim
+├── MessagingInterface kPostPostLoad
+│   └── Integration::Broadcast()      - dispatches SALInterfaceV1 (include/SAL_API.h) to all
+│                                       plugins; companions listen for "SimpleAlternateLevelling"
 └── MessagingInterface kDataLoaded
     ├── SkillHook::Install()          - trampolines into PlayerCharacter::AddSkillExperience
     │                                   (discards all organic skill XP) and
@@ -31,7 +34,8 @@ SKSEPluginLoad()
     │   ├── LevelIncrease::Event      - diagnostic only; never writes the threshold
     │   └── MenuOpenCloseEvent        - LevelUp Menu close writes the capped threshold
     ├── CharCreateWatcher             - MenuOpenCloseEvent sink; fires NormalizeSkills after
-    │                                   "RaceSex Menu" or "RaceMenu" closes on a new game
+    │                                   "RaceSex Menu" or "RaceMenu" closes on a new game, then
+    │                                   the integration character-created callback (every mode)
     └── GameSettingCollection         - overrides fXPLevelUpBase + fXPLevelUpMult to match
                                         Config curve; also writes levelThreshold directly
                                         (stored value is baked at char creation, not updated
@@ -47,8 +51,10 @@ SKSEPluginLoad()
 | `src/XPManager.cpp` / `include/XPManager.h` | `AwardXP()` (native XP bucket feed, merged HUD notifications), quest/discovery guards, mod-owned pending points |
 | `src/Progression.cpp` / `include/Progression.h` | Pure curve validation/threshold calculation and versioned cosave codec |
 | `src/RewardRules.cpp` / `include/RewardRules.h` | Dependency-free reward eligibility, lifecycle, arithmetic, and marker/lock mappings |
-| `src/Leveling.cpp` / `include/Leveling.h` | Game-setting synchronization and finalized-level threshold refresh |
-| `src/UIRules.cpp` / `include/UIRules.h` | Dependency-free UI validation and transactional allocation session rules |
+| `src/Leveling.cpp` / `include/Leveling.h` | Game-setting synchronization, finalized-level threshold refresh with the integration multiplier, level-up-safe integration refresh |
+| `include/SAL_API.h` | Public consumer header: `SALInterfaceV1` (C types and function pointers only), message type, sender name |
+| `src/Integration.cpp` / `include/Integration.h` | Interface instance, one-registrant slots, main-thread callback dispatch |
+| `src/UIRules.cpp` / `include/UIRules.h` | Dependency-free UI validation, transactional allocation session, level-up step hand-off and character-created signal |
 | `src/SkillHook.cpp` / `include/SkillHook.h` | `write_branch<5>` hooks: AddSkillExperience (discard), TESObjectBOOK::Activate (world-read trigger) |
 | `src/SkillMenu.cpp` / `include/SkillMenu.h` | Validated Scaleform boundary, menu lifecycle, preview/commit transaction, vanilla continuation |
 | `src/SettingsModel.cpp` / `include/SettingsModel.h` | Defaults-driven setting registry, bounds, layering, migration, presets, draft transaction, overrides |
@@ -71,8 +77,18 @@ Vanilla LevelUp Menu opens
   -> mouse/keyboard allocations update preview deltas only
   -> Reset clears deltas without touching native actor values
   -> Confirm/C/Escape revalidates the snapshot and commits once
-  -> unspent points are stored and the vanilla LevelUp Menu opens once
+  -> unspent points are stored
+  -> integration step registered and wantsStep(level)? wait for ContinueLevelUp
+     (fail-safe: 10 s of unpaused play); otherwise continue immediately
+  -> the vanilla LevelUp Menu opens once
 ```
+
+Every path that ends SAL's part of a level-up (confirm, preserve-all, no points,
+invalid session) goes through `HandOffOrContinue`, so the step runs even when
+the skill menu is skipped. `IsDeferringVanillaLevelUp()` stays true while the
+step waits, so the threshold refresh still happens only on the final vanilla
+LevelUp Menu close. The hand-off is reset with the other SkillMenu state on
+load, revert, and new game, and is never persisted.
 
 The menu state machine is `Idle -> Opening -> Active -> Committing -> Closing`.
 Every Scaleform callback must originate from the active movie, have the exact argument
@@ -135,6 +151,13 @@ threshold(level) = min(xpCap, xpBase + max(level, 1) * xpIncrease)
 ```
 
 `xpBase` -> `fXPLevelUpBase`, `xpIncrease` -> `fXPLevelUpMult`.
+
+The live threshold written by `Leveling::RefreshThreshold` is then multiplied by
+the integration provider's value via `Progression::ApplyThresholdMultiplier`
+(non-finite or <= 0 ignored, clamped to `[integration.threshold_multiplier_floor, 1]`).
+The game settings stay unmultiplied, and `RewardScale` always uses the
+unmodified curve. Integration refresh requests are folded into the LevelUp
+Menu close refresh while a level-up is in progress.
 
 README.md "How XP is calculated" is the player-facing reference for every source's base
 value, the scaling, and worked examples. Keep it in sync with any reward change.
@@ -220,6 +243,10 @@ is collision-free. `IsRead()` is still false inside `Activate` before the origin
   `kNewGame`, so each location awards once per playthrough, wherever the player is.
 - Call `SKSE::Init(a_skse, { .log = false })`. The default `InitInfo` creates CommonLib's
   own logger and replaces the timestamped session logger from `InitializeLog()`.
+- Keep threshold writes out of an in-progress level-up. `Leveling::MarkLevelIncrease` and
+  `MarkLevelUpFinished` bracket it; `RequestIntegrationRefresh` checks them.
+- Do not re-queue a task from inside a task to poll every frame. The continuation
+  fail-safe uses a detached ticker thread that posts one sample task every 250 ms.
 - `QUEST_DATA::Type::kCompanions` does not exist. Use `kCompanionsQuest`.
 - `TESActorValueChangeEvent` and `TESPerkEntryRunEvent` have no struct definitions in this
   CommonLibSSE-NG build; those sinks are commented out.
