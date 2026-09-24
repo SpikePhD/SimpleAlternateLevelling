@@ -107,6 +107,142 @@ UI strings use Skyrim translation files. Additional languages can provide
 `Interface/Translations/SimpleAlternateLevelling_<LANGUAGE>.txt` with the same
 `$SAL_*` keys as the English file.
 
+## How XP is calculated
+
+Skyrim's own skill XP is switched off: skills rise only through the level-up
+allocation screen, and character XP comes only from the actions below. Every
+value in this section is a default and can be changed on the settings page
+(SKSE Menu Framework) or in `SimpleAlternateLevelling.user.json`.
+
+### XP needed per level
+
+```text
+XP needed(level) = min(cap, base + level x increase)
+```
+
+Defaults match vanilla: base 75, increase 25, no cap. Level 1 needs 100 XP,
+level 10 needs 325, level 30 needs 825, and level 50 needs 1,325. Overflow
+carries into the next level.
+
+### Every reward: base value x level scaling
+
+Each action has a **base value** (below). When it is awarded, the base value is
+multiplied by a **level scaling factor**, so rewards grow as levels get longer:
+
+```text
+reward  = base value x scaling
+scaling = (XP needed at your level / XP needed at level 1) ^ exponent
+exponent = min(1, reward growth x source weight)
+```
+
+- **Reward growth** (default 0.5) sets how much rewards keep up with the curve:
+  0 = rewards never grow (effort per level rises with the curve), 1 = every
+  level takes the same effort.
+- **Source weights** tilt the growth per source. Defaults: quests 0.6,
+  kills 1.5, exploration, locks, books, and pickpocketing 1.0. Quests carry the
+  early levels; fighting becomes the main source of XP later.
+- The exponent never exceeds 1, and the factor stops growing once the XP curve
+  reaches its cap.
+
+With the defaults the scaling factors are:
+
+| Your level | XP needed | Quests (x^0.30) | Kills (x^0.75) | Other sources (x^0.50) |
+|---|---|---|---|---|
+| 1 | 100 | x1.00 | x1.00 | x1.00 |
+| 10 | 325 | x1.42 | x2.42 | x1.80 |
+| 30 | 825 | x1.88 | x4.87 | x2.87 |
+| 50 | 1,325 | x2.17 | x6.94 | x3.64 |
+
+### Base value of each source
+
+**Quests** (weight: quests). Awarded once when a quest completes; repeatable
+quests can pay again after they restart. The value depends on the quest type:
+
+| Quest type | Base XP |
+|---|---|
+| Main questline, Daedric, Civil War, Dragonborn | 75 |
+| College, Thieves Guild, Dark Brotherhood, Companions, Side quests, Dawnguard | 50 |
+| Miscellaneous, any other type | 25 |
+
+**Miscellaneous objectives** (weight: quests). 10 XP each time an objective of
+a miscellaneous quest is completed. When a quest completes several objectives
+in the same moment (typically every leftover branch as an errand wraps up),
+that batch pays a single objective reward.
+
+**Kills** (weight: kills). Awarded when you kill an enemy, or when an actor
+you command does (a summon, thrall, or reanimated corpse). Kills by regular
+followers do not count. Killing your own summons, thralls, or reanimated
+corpses never pays. Respawned enemies pay again.
+
+```text
+kill base = (type value + max(0, enemy level - your level) x level bonus) x kill multiplier
+```
+
+| Enemy type (first match) | Type value |
+|---|---|
+| Dragon | 20 |
+| Daedra | 15 |
+| Undead | 8 |
+| Animal | 3 |
+| Creature | 5 |
+| Humanoid | 5 |
+| Anything else | 5 |
+
+Level bonus defaults to 1 XP per level the enemy is above you; the kill
+multiplier defaults to 1.0.
+
+**Exploration** (weight: exploration). Discovering a location pays once, based
+on its map-marker type; clearing a location pays once per playthrough, based on
+its marker type or location keywords. Examples of defaults:
+
+| Location type | Discover | Clear |
+|---|---|---|
+| Cave, camp, mine | 10 | 40 (mine 30) |
+| Fort | 15 | 60 |
+| Nordic ruin, Dwemer ruin, dragon lair | 15-30 | 100 |
+| City, town, settlement | 15 | 30 |
+| Giant camp | 20 | 60 |
+| Anything unlisted ("Other") | 10 | 15 |
+
+All 35 location types have their own discover and clear values on the settings
+page.
+
+**Locks** (weight: locks). Each successful lockpick pays by the lock's tier,
+read when the lockpicking screen opens: novice 2, apprentice 3, adept 4,
+expert 5, master 6.
+
+**Books** (weight: books). The first read of each book pays, whether read from
+the world, your inventory, or a container; spell tomes count as books.
+
+```text
+book base = skill book           -> skill book value (2)
+            other books, value on -> max(1, gold value) x value multiplier (0.25)
+            other books, value off-> regular book value (2)
+          then x book multiplier (1.0)
+```
+
+Value-based XP is off by default.
+
+**Pickpocketing** (weight: pickpocketing). 5 XP per successful pickpocket.
+
+### Worked examples (defaults)
+
+| Action | Level 1 | Level 10 | Level 30 | Level 50 |
+|---|---|---|---|---|
+| Side quest | 50 | 71 | 94 | 109 |
+| Main quest | 75 | 107 | 141 | 163 |
+| Misc objective | 10 | 14 | 19 | 22 |
+| Same-level bandit | 5 | 12 | 24 | 35 |
+| Dragon | 20 | 48 | 97 | 139 |
+| Cave cleared | 40 | 72 | 115 | 146 |
+| Nordic ruin cleared | 100 | 180 | 287 | 364 |
+| Novice lock | 2 | 3.6 | 5.7 | 7.3 |
+
+At level 1 a level takes 20 same-level bandits or 2 side quests; at level 30 it
+takes about 34 bandits or 9 side quests, and at level 50 about 38 bandits or 12
+side quests. The in-game **Stats** page shows the live multipliers, an estimate
+for your next level, and where this session's XP came from.
+
 ## In-game settings
 
 In-game settings use [SKSE Menu Framework](https://www.nexusmods.com/skyrimspecialedition/mods/120352),
