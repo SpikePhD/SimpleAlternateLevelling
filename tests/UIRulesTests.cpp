@@ -159,6 +159,70 @@ int main()
     assert(handoff.ObserveSample(false, 1.0 + LevelUpHandoff::kDefaultGraceSeconds, std::nan("")));
     handoff.Reset();
 
+    // Level-up sequence: neither step registered.
+    LevelUpFlow flow;
+    assert(flow.Stage() == LevelUpStage::kIdle);
+    assert(flow.Begin(false, false) == FlowAction::kOpenSkillMenu);
+    assert(flow.Stage() == LevelUpStage::kSkillMenu);
+    assert(flow.FinishSkillMenu(false, false) == FlowAction::kOpenVanilla);
+    assert(flow.Stage() == LevelUpStage::kVanilla);
+    assert(flow.Continue() == FlowAction::kNone);
+    flow.Reset();
+    assert(flow.Stage() == LevelUpStage::kIdle);
+
+    // Registered steps that decline behave as unregistered.
+    assert(flow.Begin(true, false) == FlowAction::kOpenSkillMenu);
+    assert(flow.FinishSkillMenu(true, false) == FlowAction::kOpenVanilla);
+    flow.Reset();
+
+    // Pre-step only.
+    assert(flow.Begin(true, true) == FlowAction::kAwaitStep);
+    assert(flow.Stage() == LevelUpStage::kPreStep);
+    assert(flow.Waiting());
+    assert(flow.FinishSkillMenu(false, false) == FlowAction::kNone);
+    assert(flow.Continue() == FlowAction::kOpenSkillMenu);
+    assert(flow.Stage() == LevelUpStage::kSkillMenu);
+    assert(flow.Continue() == FlowAction::kNone);
+    assert(flow.FinishSkillMenu(false, false) == FlowAction::kOpenVanilla);
+    flow.Reset();
+
+    // Post-step (V1) only.
+    assert(flow.Begin(false, false) == FlowAction::kOpenSkillMenu);
+    assert(flow.Continue() == FlowAction::kNone);
+    assert(flow.FinishSkillMenu(true, true) == FlowAction::kAwaitStep);
+    assert(flow.Stage() == LevelUpStage::kPostStep);
+    assert(flow.Continue() == FlowAction::kOpenVanilla);
+    assert(flow.Stage() == LevelUpStage::kVanilla);
+    assert(flow.Continue() == FlowAction::kNone);
+    flow.Reset();
+
+    // Both steps: each waits independently.
+    assert(flow.Begin(true, true) == FlowAction::kAwaitStep);
+    assert(flow.Continue() == FlowAction::kOpenSkillMenu);
+    assert(flow.FinishSkillMenu(true, true) == FlowAction::kAwaitStep);
+    assert(flow.Stage() == LevelUpStage::kPostStep);
+    assert(flow.Continue() == FlowAction::kOpenVanilla);
+    assert(flow.Continue() == FlowAction::kNone);
+
+    // Fail-safe applies to the pre-step and resumes to the skill menu.
+    assert(flow.Begin(true, true) == FlowAction::kAwaitStep);
+    assert(!flow.ObserveSample(false, 0.0, 10.0));
+    assert(!flow.ObserveSample(true, 5.0, 10.0));
+    assert(!flow.ObserveSample(false, 6.0, 10.0));
+    assert(flow.ObserveSample(false, 16.0, 10.0));
+    assert(flow.Continue() == FlowAction::kOpenSkillMenu);
+    assert(!flow.ObserveSample(false, 100.0, 10.0));
+
+    // Reset discards a pending wait; Begin restarts from any stage.
+    assert(flow.FinishSkillMenu(true, true) == FlowAction::kAwaitStep);
+    flow.Reset();
+    assert(!flow.Waiting());
+    assert(flow.Continue() == FlowAction::kNone);
+    assert(flow.Begin(true, true) == FlowAction::kAwaitStep);
+    assert(flow.Begin(false, false) == FlowAction::kOpenSkillMenu);
+    assert(!flow.Waiting());
+    flow.Reset();
+
     // Character-created callback.
     CharacterCreatedSignal created;
     created.ObserveCreationMenuClosed();

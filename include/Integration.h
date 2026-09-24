@@ -16,5 +16,8 @@ namespace EA::Integration {
     [[nodiscard]] bool HasLevelUpStep();
     [[nodiscard]] bool WantsLevelUpStep(std::uint32_t level);
 
+    [[nodiscard]] bool HasPreSkillMenuStep();
+    [[nodiscard]] bool WantsPreSkillMenuStep(std::uint32_t level);
+
     void NotifyCharacterCreated();
 }

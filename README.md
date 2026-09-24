@@ -314,25 +314,34 @@ before. Copy [`include/SAL_API.h`](include/SAL_API.h) into the companion
 project; it depends only on `<cstdint>` and uses plain C types and function
 pointers, so it is safe across DLLs built with different toolchains.
 
+The current version is **2**. `SALInterfaceV2` starts with a complete
+`SALInterfaceV1`, so plugins written for V1 keep working.
+
 ### Handshake
 
 1. In `SKSEPlugin_Load`, register a messaging listener for the sender
    `SAL::kSenderName` (`"SimpleAlternateLevelling"`).
 2. At `kPostPostLoad`, SAL dispatches a message of type
    `SAL::kMessageInterface` to all listeners. `msg->data` points to a static
-   `SAL::SALInterfaceV1` that stays valid for the life of the process.
-3. Check `msg->dataLen >= sizeof(SAL::SALInterfaceV1)` and `version >= 1`,
-   keep the pointer, and register callbacks.
+   `SAL::SALInterfaceV2` (`v1.version == 2`, `dataLen == sizeof(SALInterfaceV2)`)
+   that stays valid for the life of the process.
+3. Check `dataLen` and `version` for the version you need, keep the pointer,
+   and register callbacks. With a V1-only SAL, fall back to the V1 members.
 
 ```cpp
 messaging->RegisterListener(SAL::kSenderName, [](SKSE::MessagingInterface::Message* msg) {
     if (!msg || msg->type != SAL::kMessageInterface || msg->dataLen < sizeof(SAL::SALInterfaceV1)) {
         return;
     }
-    g_sal = static_cast<const SAL::SALInterfaceV1*>(msg->data);
-    g_sal->RegisterThresholdMultiplier(&MyMultiplier);
-    g_sal->RegisterLevelUpStep(&MyWantsStep);
-    g_sal->RegisterCharacterCreated(&MyOnCharacterCreated);
+    const auto* v1 = static_cast<const SAL::SALInterfaceV1*>(msg->data);
+    if (v1->version >= SAL::kInterfaceVersion2 && msg->dataLen >= sizeof(SAL::SALInterfaceV2)) {
+        const auto* v2 = static_cast<const SAL::SALInterfaceV2*>(msg->data);
+        v2->RegisterPreSkillMenuStep(&MyWantsPreStep);
+    } else {
+        v1->RegisterLevelUpStep(&MyWantsStep);  // V1-only SAL
+    }
+    v1->RegisterThresholdMultiplier(&MyMultiplier);
+    v1->RegisterCharacterCreated(&MyOnCharacterCreated);
 });
 ```
 
@@ -350,25 +359,49 @@ without it.
 - Nothing is persisted. SAL's cosave format is unchanged, and all pending
   hand-off state is discarded on load, revert, and new game.
 
+### Level-up sequence
+
+```text
+vanilla LevelUp Menu opens -> SAL hides it
+  -> pre-skill-menu step (V2): wantsStep(level)? wait for ContinueLevelUp
+  -> SAL skill menu ("no points" still skips it)
+  -> level-up step (V1): wantsStep(level)? wait for ContinueLevelUp
+  -> vanilla LevelUp Menu opens once (attribute choice)
+```
+
+Each step is optional and waits independently; only one wait is ever pending.
+The threshold is refreshed only when the final vanilla LevelUp Menu closes.
+
 ### Functions
 
 | Member | Contract |
 |---|---|
-| `version` | `1` for this layout. Later versions only append members. |
+| `v1.version` | `2` in a V2 broadcast, `1` from a V1-only SAL. Later versions only append members. |
 | `RegisterThresholdMultiplier(float (*provider)())` | `provider()` returns a multiplier for the XP needed per level. It is called whenever SAL writes the threshold: data load, game load, new game, settings changes, after each level-up, and on request. Non-finite or `<= 0` values are ignored (treated as 1.0); results are clamped to `[threshold_multiplier_floor, 1.0]`. It never changes reward scaling or the native `fXPLevelUpBase`/`fXPLevelUpMult` settings. |
-| `RequestThresholdRefresh()` | Recomputes the threshold after the provider's value changes. Requests made during a level-up (from `LevelIncrease` until the vanilla LevelUp Menu closes, including a level-up step) are folded into the refresh SAL already does when that menu closes, so the engine's XP subtraction is never disturbed. |
-| `RegisterLevelUpStep(bool (*wantsStep)(uint32_t level))` | Adds a step between SAL's skill menu and the vanilla LevelUp Menu. When SAL is about to open the vanilla menu (after Confirm, and also when its own menu is skipped because there are no points or it failed to open), it calls `wantsStep(level)` with the player's current level. `false` continues immediately, as if no step were registered. `true` makes SAL wait for `ContinueLevelUp`. Only decide and queue your UI here. |
-| `ContinueLevelUp()` | Ends the wait and opens the vanilla LevelUp Menu exactly once. Idempotent; ignored when SAL is not waiting. |
+| `RequestThresholdRefresh()` | Recomputes the threshold after the provider's value changes. Requests made during a level-up (from interception or `LevelIncrease` until the vanilla LevelUp Menu closes, including both steps) are folded into the refresh SAL already does when that menu closes, so the engine's XP subtraction is never disturbed. |
+| `RegisterPreSkillMenuStep(bool (*wantsStep)(uint32_t level))` (V2) | Runs on every level-up SAL intercepts, before its skill menu, regardless of how many skill points it grants. `level` is the player's current level. `false` continues immediately; `true` makes SAL wait for `ContinueLevelUp`, after which it opens its skill menu (or skips it as usual when there are no points). Only decide and queue your UI here. |
+| `RegisterLevelUpStep(bool (*wantsStep)(uint32_t level))` | Runs when SAL is about to open the vanilla menu: after Confirm, and also when its own menu is skipped because there are no points or it failed to open. Same `true`/`false` contract; after `ContinueLevelUp` the vanilla LevelUp Menu opens. |
+| `ContinueLevelUp()` | Resumes **whichever step is waiting**. Idempotent; ignored when nothing waits. |
 | `RegisterCharacterCreated(void (*callback)())` | Called once per new character, after RaceSex Menu/RaceMenu closes and SAL has applied its starting skills (in Vanilla starting-skills mode, right after the menu closes). Never called for loaded saves or for a mid-game `showracemenu`. |
 
-### Level-up step owners must always continue
+### Step owners must always continue, exactly once
 
 A step owner **must call `ContinueLevelUp` on every exit path**: confirm,
-cancel, Escape, errors, and menus closed by other mods. Until it does, the
-vanilla perk/attribute screen does not open.
+cancel, Escape, errors, and menus closed by other mods. Until it does, SAL's
+skill menu (pre-step) or the vanilla perk/attribute screen (V1 step) does not
+open.
+
+Because `ContinueLevelUp` is shared, a step owner must call it **once per
+wait**. When both steps are registered and the skill menu is skipped (no
+points), the V1 step starts the moment the pre-step ends; a second call from
+the pre-step owner would end the V1 step early.
 
 As a fail-safe, SAL continues by itself when the game has stayed unpaused for
-10 seconds while it is waiting, and logs a warning. Keep a pausing menu open
-for the whole step so the fail-safe never interrupts a player who is still
-choosing. If something else opens the vanilla LevelUp Menu while SAL is waiting,
-SAL treats that as the continuation.
+10 seconds while a step is waiting, and logs a warning. Keep a pausing menu
+open for the whole step so the fail-safe never interrupts a player who is
+still choosing.
+
+If something else opens the vanilla LevelUp Menu while a step is waiting:
+- during the pre-step, SAL hides it again and continues to its skill menu,
+  so no skill points are lost;
+- during the V1 step, SAL treats it as the continuation.

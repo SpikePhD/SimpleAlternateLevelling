@@ -18,7 +18,7 @@ SKSEPluginLoad()
 ├── Serialization callbacks  - cosave v6: persists pendingSkillPoints + skillsNormalized;
 │                              native PlayerSkills::xp remains owned by Skyrim
 ├── MessagingInterface kPostPostLoad
-│   └── Integration::Broadcast()      - dispatches SALInterfaceV1 (include/SAL_API.h) to all
+│   └── Integration::Broadcast()      - dispatches SALInterfaceV2 (include/SAL_API.h) to all
 │                                       plugins; companions listen for "SimpleAlternateLevelling"
 └── MessagingInterface kDataLoaded
     ├── SkillHook::Install()          - trampolines into PlayerCharacter::AddSkillExperience
@@ -52,9 +52,9 @@ SKSEPluginLoad()
 | `src/Progression.cpp` / `include/Progression.h` | Pure curve validation/threshold calculation and versioned cosave codec |
 | `src/RewardRules.cpp` / `include/RewardRules.h` | Dependency-free reward eligibility, lifecycle, arithmetic, and marker/lock mappings |
 | `src/Leveling.cpp` / `include/Leveling.h` | Game-setting synchronization, finalized-level threshold refresh with the integration multiplier, level-up-safe integration refresh |
-| `include/SAL_API.h` | Public consumer header: `SALInterfaceV1` (C types and function pointers only), message type, sender name |
+| `include/SAL_API.h` | Public consumer header: `SALInterfaceV2` with `SALInterfaceV1` prefix (C types and function pointers only), message type, sender name |
 | `src/Integration.cpp` / `include/Integration.h` | Interface instance, one-registrant slots, main-thread callback dispatch |
-| `src/UIRules.cpp` / `include/UIRules.h` | Dependency-free UI validation, transactional allocation session, level-up step hand-off and character-created signal |
+| `src/UIRules.cpp` / `include/UIRules.h` | Dependency-free UI validation, transactional allocation session, level-up step hand-off and `LevelUpFlow` sequence, character-created signal |
 | `src/SkillHook.cpp` / `include/SkillHook.h` | `write_branch<5>` hooks: AddSkillExperience (discard), TESObjectBOOK::Activate (world-read trigger) |
 | `src/SkillMenu.cpp` / `include/SkillMenu.h` | Validated Scaleform boundary, menu lifecycle, preview/commit transaction, vanilla continuation |
 | `src/SettingsModel.cpp` / `include/SettingsModel.h` | Defaults-driven setting registry, bounds, layering, migration, presets, draft transaction, overrides |
@@ -73,22 +73,28 @@ SKSEPluginLoad()
 ```text
 Vanilla LevelUp Menu opens
   -> MenuOpenCloseEvent defers and hides it
+  -> V2 pre-skill-menu step registered and wantsStep(level)? wait for ContinueLevelUp
+     (fail-safe: 10 s of unpaused play); otherwise continue immediately
   -> SkillMenu snapshots the 18 native skill values
   -> mouse/keyboard allocations update preview deltas only
   -> Reset clears deltas without touching native actor values
   -> Confirm/C/Escape revalidates the snapshot and commits once
   -> unspent points are stored
-  -> integration step registered and wantsStep(level)? wait for ContinueLevelUp
-     (fail-safe: 10 s of unpaused play); otherwise continue immediately
+  -> V1 level-up step registered and wantsStep(level)? wait for ContinueLevelUp
+     (same fail-safe); otherwise continue immediately
   -> the vanilla LevelUp Menu opens once
 ```
 
-Every path that ends SAL's part of a level-up (confirm, preserve-all, no points,
-invalid session) goes through `HandOffOrContinue`, so the step runs even when
-the skill menu is skipped. `IsDeferringVanillaLevelUp()` stays true while the
-step waits, so the threshold refresh still happens only on the final vanilla
-LevelUp Menu close. The hand-off is reset with the other SkillMenu state on
-load, revert, and new game, and is never persisted.
+The sequence is the pure `UIRules::LevelUpFlow` (PreStep -> SkillMenu -> PostStep ->
+Vanilla); only one step waits at a time and the shared `ContinueLevelUp` resumes it.
+`BeginLevelUpFlow` starts it after the vanilla menu is hidden. Every path that ends
+SAL's part (confirm, preserve-all, no points, invalid session) goes through
+`HandOffOrContinue`, so the V1 step runs even when the skill menu is skipped.
+`IsDeferringVanillaLevelUp()` stays true while either step waits, so the threshold
+refresh still happens only on the final vanilla LevelUp Menu close. A vanilla open
+by something else during the pre-step is hidden again and continues to the skill
+menu; during the V1 step it counts as the continuation. The flow is reset with the
+other SkillMenu state on load, revert, and new game, and is never persisted.
 
 The menu state machine is `Idle -> Opening -> Active -> Committing -> Closing`.
 Every Scaleform callback must originate from the active movie, have the exact argument

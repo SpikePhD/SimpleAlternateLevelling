@@ -16,6 +16,7 @@ namespace EA::Integration {
 
         std::atomic<MultiplierProvider>       s_multiplierProvider{ nullptr };
         std::atomic<LevelUpStep>              s_levelUpStep{ nullptr };
+        std::atomic<LevelUpStep>              s_preSkillMenuStep{ nullptr };
         std::atomic<CharacterCreatedCallback> s_characterCreated{ nullptr };
         bool                                  s_broadcast{ false };
 
@@ -61,13 +62,34 @@ namespace EA::Integration {
             return RegisterSlot(s_characterCreated, callback, "character-created callback");
         }
 
-        SAL::SALInterfaceV1 s_interface{
-            SAL::kInterfaceVersion1,
-            RegisterThresholdMultiplierApi,
-            RequestThresholdRefreshApi,
-            RegisterLevelUpStepApi,
-            ContinueLevelUpApi,
-            RegisterCharacterCreatedApi
+        bool RegisterPreSkillMenuStepApi(LevelUpStep wantsStep)
+        {
+            return RegisterSlot(s_preSkillMenuStep, wantsStep, "pre-skill-menu step");
+        }
+
+        bool AskStep(LevelUpStep step, std::uint32_t level, std::string_view name)
+        {
+            if (!step) {
+                return false;
+            }
+            try {
+                return step(level);
+            } catch (...) {
+                logger::error("[EA] Integration: {} threw for level {}; continuing without it.", name, level);
+                return false;
+            }
+        }
+
+        SAL::SALInterfaceV2 s_interface{
+            {
+                SAL::kInterfaceVersion2,
+                RegisterThresholdMultiplierApi,
+                RequestThresholdRefreshApi,
+                RegisterLevelUpStepApi,
+                ContinueLevelUpApi,
+                RegisterCharacterCreatedApi
+            },
+            RegisterPreSkillMenuStepApi
         };
     }
 
@@ -90,11 +112,11 @@ namespace EA::Integration {
         if (!raw.Dispatch(SKSE::GetPluginHandle(), SAL::kMessageInterface, &s_interface,
                 static_cast<std::uint32_t>(sizeof(s_interface)), nullptr)) {
             logger::info("[EA] Integration: interface V{} broadcast; no companion plugin is listening.",
-                s_interface.version);
+                s_interface.v1.version);
             return;
         }
         logger::info("[EA] Integration: interface V{} broadcast to listeners of '{}'.",
-            s_interface.version, SAL::kSenderName);
+            s_interface.v1.version, SAL::kSenderName);
     }
 
     bool HasThresholdMultiplier()
@@ -123,16 +145,17 @@ namespace EA::Integration {
 
     bool WantsLevelUpStep(std::uint32_t level)
     {
-        const auto step = s_levelUpStep.load();
-        if (!step) {
-            return false;
-        }
-        try {
-            return step(level);
-        } catch (...) {
-            logger::error("[EA] Integration: level-up step threw for level {}; continuing without it.", level);
-            return false;
-        }
+        return AskStep(s_levelUpStep.load(), level, "level-up step");
+    }
+
+    bool HasPreSkillMenuStep()
+    {
+        return s_preSkillMenuStep.load() != nullptr;
+    }
+
+    bool WantsPreSkillMenuStep(std::uint32_t level)
+    {
+        return AskStep(s_preSkillMenuStep.load(), level, "pre-skill-menu step");
     }
 
     void NotifyCharacterCreated()

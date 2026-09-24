@@ -249,6 +249,54 @@ namespace EA::UIRules {
         _unpausedSince.reset();
     }
 
+    FlowAction LevelUpFlow::Begin(bool preStepRegistered, bool preStepWants) noexcept
+    {
+        _handoff.Reset();
+        if (_handoff.Begin(preStepRegistered, preStepWants) == HandoffDecision::kAwaitStep) {
+            _stage = LevelUpStage::kPreStep;
+            return FlowAction::kAwaitStep;
+        }
+        _stage = LevelUpStage::kSkillMenu;
+        return FlowAction::kOpenSkillMenu;
+    }
+
+    FlowAction LevelUpFlow::FinishSkillMenu(bool postStepRegistered, bool postStepWants) noexcept
+    {
+        if (_handoff.Waiting()) {
+            return FlowAction::kNone;
+        }
+        if (_handoff.Begin(postStepRegistered, postStepWants) == HandoffDecision::kAwaitStep) {
+            _stage = LevelUpStage::kPostStep;
+            return FlowAction::kAwaitStep;
+        }
+        _stage = LevelUpStage::kVanilla;
+        return FlowAction::kOpenVanilla;
+    }
+
+    FlowAction LevelUpFlow::Continue() noexcept
+    {
+        if (!_handoff.Continue()) {
+            return FlowAction::kNone;
+        }
+        if (_stage == LevelUpStage::kPreStep) {
+            _stage = LevelUpStage::kSkillMenu;
+            return FlowAction::kOpenSkillMenu;
+        }
+        _stage = LevelUpStage::kVanilla;
+        return FlowAction::kOpenVanilla;
+    }
+
+    bool LevelUpFlow::ObserveSample(bool gamePaused, double nowSeconds, double graceSeconds) noexcept
+    {
+        return _handoff.ObserveSample(gamePaused, nowSeconds, graceSeconds);
+    }
+
+    void LevelUpFlow::Reset() noexcept
+    {
+        _stage = LevelUpStage::kIdle;
+        _handoff.Reset();
+    }
+
     void CharacterCreatedSignal::Arm() noexcept
     {
         _armed = true;

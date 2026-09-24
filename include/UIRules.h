@@ -127,6 +127,49 @@ namespace EA::UIRules {
         std::optional<double> _unpausedSince{};
     };
 
+    // Level-up sequence after SAL intercepts the vanilla LevelUp Menu:
+    // pre-skill-menu step -> skill menu -> post-skill-menu (V1) step ->
+    // vanilla menu. Each step is optional and waits independently; only one
+    // wait is ever pending. Never persisted.
+    enum class LevelUpStage {
+        kIdle,
+        kPreStep,    // waiting for the pre-skill-menu step owner
+        kSkillMenu,  // SAL's skill menu (or its skip paths) is running
+        kPostStep,   // waiting for the post-skill-menu step owner
+        kVanilla,    // vanilla LevelUp Menu queued
+    };
+
+    enum class FlowAction {
+        kNone,
+        kAwaitStep,       // start the continuation fail-safe and wait
+        kOpenSkillMenu,
+        kOpenVanilla,
+    };
+
+    class LevelUpFlow {
+    public:
+        // The vanilla menu was intercepted: wait for the pre-step or open
+        // the skill menu. Restarts the sequence from any stage.
+        [[nodiscard]] FlowAction Begin(bool preStepRegistered, bool preStepWants) noexcept;
+        // SAL's part ended (confirmed, skipped, or failed): wait for the
+        // post-step or open the vanilla menu. kNone while a step is waiting.
+        [[nodiscard]] FlowAction FinishSkillMenu(bool postStepRegistered, bool postStepWants) noexcept;
+        // Resumes whichever step is waiting: kOpenSkillMenu after the
+        // pre-step, kOpenVanilla after the post-step, kNone when idle.
+        [[nodiscard]] FlowAction Continue() noexcept;
+        // Fail-safe sample; true when the caller should Continue().
+        [[nodiscard]] bool ObserveSample(bool gamePaused, double nowSeconds,
+            double graceSeconds = LevelUpHandoff::kDefaultGraceSeconds) noexcept;
+        void Reset() noexcept;
+
+        [[nodiscard]] LevelUpStage Stage() const noexcept { return _stage; }
+        [[nodiscard]] bool Waiting() const noexcept { return _handoff.Waiting(); }
+
+    private:
+        LevelUpStage   _stage{ LevelUpStage::kIdle };
+        LevelUpHandoff _handoff;
+    };
+
     // Fires the integration character-created callback once per new game,
     // after a creation menu has closed, no creation menu remains open, and
     // starting skills are settled (normalized, or Vanilla mode).
