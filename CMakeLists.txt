@@ -6,7 +6,7 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 
 project(
     SimpleAlternateLevelling
-    VERSION 0.3.0
+    VERSION 0.4.0
     LANGUAGES CXX
 )
 
