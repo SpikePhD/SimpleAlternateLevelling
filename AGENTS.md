@@ -253,6 +253,10 @@ is collision-free. `IsRead()` is still false inside `Activate` before the origin
   `kNewGame`, so each location awards once per playthrough, wherever the player is.
 - Call `SKSE::Init(a_skse, { .log = false })`. The default `InitInfo` creates CommonLib's
   own logger and replaces the timestamped session logger from `InitializeLog()`.
+- `kNewGame` arrives before character creation opens (the Helgen intro), so "no creation
+  menu open" is already true then. Starting skills are applied only after RaceSex Menu /
+  RaceMenu has closed in this new game (`s_creationMenuClosed`); otherwise the race's skill
+  bonuses are applied on top of the normalized values.
 - Keep threshold writes out of an in-progress level-up. `Leveling::MarkLevelIncrease` and
   `MarkLevelUpFinished` bracket it; `RequestIntegrationRefresh` checks them.
 - Do not re-queue a task from inside a task to poll every frame. The continuation

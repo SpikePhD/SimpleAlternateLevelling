@@ -164,6 +164,11 @@ namespace {
     static float s_startingUniformValue = 0.0f;
     static std::unordered_map<std::string, float> s_startingCustom;
     static bool s_normalizeTaskQueued = false;
+    // Set when RaceSex Menu/RaceMenu closes after kNewGame. kNewGame arrives
+    // before character creation opens (the Helgen intro), so "no creation
+    // menu open" alone would normalize before the race is chosen and the
+    // race's skill bonuses would then be applied on top.
+    static bool s_creationMenuClosed = false;
     static bool s_charCreateWatcherRegistered = false;
     static bool s_dataLoadedHandled = false;
     static std::atomic<std::uint64_t> s_lifecycleGeneration{ 1 };
@@ -174,6 +179,7 @@ namespace {
     static void InvalidateDeferredLifecycleWork() {
         s_lifecycleGeneration.fetch_add(1);
         s_normalizeTaskQueued = false;
+        s_creationMenuClosed = false;
         s_characterCreated.Reset();
         EA::SkillMenu::ResetState();
         EA::Leveling::ResetState();
@@ -324,7 +330,8 @@ namespace {
     }
 
     static void QueueNormalizeSkillsWhenReady() {
-        if (s_startingMode == EA::Config::StartingSkillsMode::Vanilla || !s_awaitingCharCreate || s_skillsNormalized || s_normalizeTaskQueued) {
+        if (s_startingMode == EA::Config::StartingSkillsMode::Vanilla || !s_awaitingCharCreate || s_skillsNormalized ||
+            s_normalizeTaskQueued || !s_creationMenuClosed) {
             return;
         }
 
@@ -342,12 +349,15 @@ namespace {
             }
             s_normalizeTaskQueued = false;
 
-            if (s_startingMode == EA::Config::StartingSkillsMode::Vanilla || !s_awaitingCharCreate || s_skillsNormalized) {
+            if (s_startingMode == EA::Config::StartingSkillsMode::Vanilla || !s_awaitingCharCreate || s_skillsNormalized ||
+                !s_creationMenuClosed) {
                 return;
             }
 
+            // Another creation menu is still open: its close event queues
+            // this task again.
             if (IsCreationMenuOpen()) {
-                QueueNormalizeSkillsWhenReady();
+                logger::info("[EA] NormalizeSkills: a creation menu is still open; waiting for it to close.");
                 return;
             }
 
@@ -383,6 +393,7 @@ namespace {
             if (s_startingMode == EA::Config::StartingSkillsMode::Vanilla) return RE::BSEventNotifyControl::kContinue;
 
             if (s_awaitingCharCreate && !s_skillsNormalized) {
+                s_creationMenuClosed = true;
                 logger::info("[EA] Menu '{}' closed during character creation - checking whether skills can be normalized.",
                     event->menuName.c_str());
                 QueueNormalizeSkillsWhenReady();
@@ -638,7 +649,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse) {
             s_startingUniformValue = EA::Config::startingSkillsUniformValue;
             s_startingCustom = EA::Config::startingSkillsCustom;
             s_characterCreated.Arm();
-            logger::info("[EA] kNewGame: awaiting RaceMenu close to normalize skills.");
+            logger::info("[EA] kNewGame: starting skills wait until character creation closes.");
             EA::Leveling::QueueThresholdRefresh(1, "new-game");
             QueueNormalizeSkillsWhenReady();
         }
