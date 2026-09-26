@@ -158,6 +158,52 @@ namespace {
         Check(ClassifyLockLevel(4) == "master", "master lock mapping");
         Check(ClassifyLockLevel(99) == "novice", "unknown lock fallback");
     }
+
+    void TestXPMultiplier()
+    {
+        using namespace EA::RewardRules;
+        constexpr float inf = std::numeric_limits<float>::infinity();
+        constexpr float nan = std::numeric_limits<float>::quiet_NaN();
+
+        Check(ToPublicXPSource(RewardSource::kQuest) == SAL::kXPSourceQuest, "quest maps to kXPSourceQuest");
+        Check(ToPublicXPSource(RewardSource::kKill) == SAL::kXPSourceKill, "kill maps to kXPSourceKill");
+        Check(ToPublicXPSource(RewardSource::kExploration) == SAL::kXPSourceExploration,
+            "exploration maps to kXPSourceExploration");
+        Check(ToPublicXPSource(RewardSource::kLock) == SAL::kXPSourceLock, "lock maps to kXPSourceLock");
+        Check(ToPublicXPSource(RewardSource::kBook) == SAL::kXPSourceBook, "book maps to kXPSourceBook");
+        Check(ToPublicXPSource(RewardSource::kPickpocket) == SAL::kXPSourcePickpocket,
+            "pickpocket maps to kXPSourcePickpocket");
+        Check(SAL::kXPSourceQuest == 0 && SAL::kXPSourceKill == 1 && SAL::kXPSourceExploration == 2 &&
+                  SAL::kXPSourceLock == 3 && SAL::kXPSourceBook == 4 && SAL::kXPSourcePickpocket == 5,
+            "public source categories keep their published values");
+
+        const auto applied = [](float raw, double expected) {
+            const auto result = SanitizeXPMultiplier(raw);
+            return result.status == XPMultiplierStatus::kApplied && result.value == expected;
+        };
+        Check(applied(1.0f, 1.0), "1.0 multiplier is identity");
+        Check(applied(2.0f, 2.0), "2.0 multiplier applied");
+        Check(applied(0.5f, 0.5), "multiplier in (0, 1) allowed for debuffs");
+        Check(applied(100.0f, 100.0), "100 is not clamped");
+        for (const float bad : { 0.0f, -0.0f, -1.0f, nan, inf, -inf }) {
+            const auto result = SanitizeXPMultiplier(bad);
+            Check(result.status == XPMultiplierStatus::kInvalid && result.value == 1.0,
+                "non-finite or <= 0 multiplier counts as 1.0");
+        }
+        const auto clamped = SanitizeXPMultiplier(100.5f);
+        Check(clamped.status == XPMultiplierStatus::kClamped && clamped.value == kMaxXPMultiplier,
+            "multiplier above 100 clamped to 100");
+        Check(SanitizeXPMultiplier(1.0e30f).value == kMaxXPMultiplier, "huge multiplier clamped");
+
+        Check(CombineReward(5.0f, 1.0, 1.0) == 5.0f, "identity combine");
+        Check(CombineReward(5.0f, 1.0, 2.0) == 10.0f, "2.0 doubles the award");
+        Check(std::fabs(CombineReward(5.0f, 1.0, SanitizeXPMultiplier(1.1f).value) - 5.5f) < 1.0e-5f,
+            "fractional result preserved, not rounded");
+        Check(std::fabs(CombineReward(4.0f, 1.5, 1.25) - 7.5f) < 1.0e-5f, "multiplier applies after scale");
+        const float overflow = CombineReward(std::numeric_limits<float>::max(), 2.0, kMaxXPMultiplier);
+        Check(!std::isfinite(overflow), "overflow reported as non-finite so AwardXP rejects it");
+        Check(!std::isfinite(CombineReward(5.0f, inf, 1.0)), "non-finite scale stays non-finite");
+    }
 }
 
 int main()
@@ -169,6 +215,7 @@ int main()
     TestTransitionsAndEligibility();
     TestKillRewards();
     TestMappings();
+    TestXPMultiplier();
     if (failures == 0) {
         std::cout << "All reward-rule tests passed.\n";
     }

@@ -1,6 +1,6 @@
 #pragma once
 
-// Simple Alternate Levelling (SAL) integration API, version 3.
+// Simple Alternate Levelling (SAL) integration API, version 4.
 //
 // Copy this header into a companion SKSE plugin. It has no dependencies
 // beyond <cstdint> and uses only plain C types and function pointers, so it
@@ -8,17 +8,20 @@
 //
 // Handshake: during SKSEPlugin_Load, register a messaging listener for the
 // sender SAL::kSenderName. At kPostPostLoad SAL broadcasts a message of type
-// SAL::kMessageInterface whose data points to a static SALInterfaceV3 that
-// stays valid for the life of the process. It begins with a SALInterfaceV2,
-// which begins with a SALInterfaceV1, so V1 and V2 consumers keep working
-// unchanged:
+// SAL::kMessageInterface whose data points to a static SALInterfaceV4 that
+// stays valid for the life of the process. It begins with a SALInterfaceV3,
+// which begins with a SALInterfaceV2, which begins with a SALInterfaceV1, so
+// V1-V3 consumers keep working unchanged:
 //
 //     messaging->RegisterListener(SAL::kSenderName, [](SKSE::MessagingInterface::Message* msg) {
 //         if (!msg || msg->type != SAL::kMessageInterface || msg->dataLen < sizeof(SAL::SALInterfaceV1)) {
 //             return;
 //         }
 //         const auto* v1 = static_cast<const SAL::SALInterfaceV1*>(msg->data);
-//         if (v1->version >= SAL::kInterfaceVersion3 && msg->dataLen >= sizeof(SAL::SALInterfaceV3)) {
+//         if (v1->version >= SAL::kInterfaceVersion4 && msg->dataLen >= sizeof(SAL::SALInterfaceV4)) {
+//             const auto* v4 = static_cast<const SAL::SALInterfaceV4*>(msg->data);
+//             /* store v4, register callbacks including RegisterXPMultiplier */
+//         } else if (v1->version >= SAL::kInterfaceVersion3 && msg->dataLen >= sizeof(SAL::SALInterfaceV3)) {
 //             const auto* v3 = static_cast<const SAL::SALInterfaceV3*>(msg->data);
 //             /* store v3, register callbacks including RegisterSkillPointBonus */
 //         } else if (v1->version >= SAL::kInterfaceVersion2 && msg->dataLen >= sizeof(SAL::SALInterfaceV2)) {
@@ -43,6 +46,8 @@
 //   Each step is optional and waits independently. ContinueLevelUp resumes
 //   whichever step is waiting, so when both steps are registered each owner
 //   must call it exactly once per wait.
+// - XP multiplier (V4): applied to every XP award as it is earned, outside
+//   the level-up sequence. It never changes the XP needed per level.
 // - Nothing registered here is persisted. SAL's cosave is unchanged.
 
 #include <cstdint>
@@ -55,10 +60,22 @@ namespace SAL {
     inline constexpr std::uint32_t kInterfaceVersion1 = 1;
     inline constexpr std::uint32_t kInterfaceVersion2 = 2;
     inline constexpr std::uint32_t kInterfaceVersion3 = 3;
+    inline constexpr std::uint32_t kInterfaceVersion4 = 4;
+
+    // XP source categories passed to the V4 XP multiplier provider. The
+    // values are stable and new categories are only ever appended; treat an
+    // unknown category like any other.
+    inline constexpr std::uint32_t kXPSourceQuest = 0;        // quests and objectives
+    inline constexpr std::uint32_t kXPSourceKill = 1;
+    inline constexpr std::uint32_t kXPSourceExploration = 2;  // discovering and clearing locations
+    inline constexpr std::uint32_t kXPSourceLock = 3;
+    inline constexpr std::uint32_t kXPSourceBook = 4;
+    inline constexpr std::uint32_t kXPSourcePickpocket = 5;
 
     struct SALInterfaceV1 {
-        // Interface version of the broadcast: 1 for a V1-only SAL, 2 or 3 when
-        // this struct is the prefix of a SALInterfaceV2 or SALInterfaceV3.
+        // Interface version of the broadcast: 1 for a V1-only SAL, 2, 3, or 4
+        // when this struct is the prefix of a SALInterfaceV2, SALInterfaceV3,
+        // or SALInterfaceV4.
         // Later versions only append members, so check version >= the
         // version you need.
         std::uint32_t version;
@@ -99,8 +116,8 @@ namespace SAL {
     };
 
     struct SALInterfaceV2 {
-        // Layout-compatible prefix. v1.version is 2 in a V2 broadcast and 3
-        // in a V3 broadcast.
+        // Layout-compatible prefix. v1.version is 2 in a V2 broadcast, 3 in
+        // a V3 broadcast, and 4 in a V4 broadcast.
         SALInterfaceV1 v1;
 
         // Pre-skill-menu step. When SAL has intercepted the vanilla LevelUp
@@ -115,7 +132,8 @@ namespace SAL {
     };
 
     struct SALInterfaceV3 {
-        // Layout-compatible prefix. v2.v1.version is 3 in a V3 broadcast.
+        // Layout-compatible prefix. v2.v1.version is 3 in a V3 broadcast and
+        // 4 in a V4 broadcast.
         SALInterfaceV2 v2;
 
         // Skill point bonus. SAL calls bonus(level) exactly once per level-up
@@ -129,5 +147,22 @@ namespace SAL {
         // kept in SAL's pending points like the base grant. SAL shows it in
         // the skill menu as a bonus from other mods.
         bool (*RegisterSkillPointBonus)(std::int32_t (*bonus)(std::uint32_t level));
+    };
+
+    struct SALInterfaceV4 {
+        // Layout-compatible prefix. v3.v2.v1.version is 4 in a V4 broadcast.
+        SALInterfaceV3 v3;
+
+        // XP reward multiplier. SAL calls provider(sourceCategory) on the
+        // main thread once per XP award, with no caching, and multiplies that
+        // award by the result: amount = base * level scaling * multiplier.
+        // sourceCategory is one of the kXPSource* constants. Because the value
+        // is read live, a temporary buff affects exactly the awards made while
+        // it is active; keep the provider cheap. Finite values in (0, 1)
+        // reduce XP. Non-finite or <= 0 values count as 1.0; values above 100
+        // are clamped to 100. The result is not rounded. It never affects the
+        // XP needed per level (see RegisterThresholdMultiplier) or SAL's
+        // level scaling of rewards.
+        bool (*RegisterXPMultiplier)(float (*provider)(std::uint32_t sourceCategory));
     };
 }

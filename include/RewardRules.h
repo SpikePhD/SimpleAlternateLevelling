@@ -1,6 +1,9 @@
 #pragma once
 
+#include "SAL_API.h"
+
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <span>
 #include <string_view>
@@ -107,6 +110,54 @@ namespace EA::RewardRules {
     // Maps an AwardContext source key (e.g. "quest_main", "kill",
     // "location_cleared", "lock_picked", "book_skill", "pickpocket").
     [[nodiscard]] RewardSource ClassifyRewardSource(std::string_view sourceKey) noexcept;
+
+    // Public SAL_API.h category for the V4 XP multiplier provider. Mapped
+    // explicitly so reordering RewardSource cannot change the public values.
+    [[nodiscard]] constexpr std::uint32_t ToPublicXPSource(RewardSource source) noexcept
+    {
+        switch (source) {
+            case RewardSource::kQuest: return SAL::kXPSourceQuest;
+            case RewardSource::kKill: return SAL::kXPSourceKill;
+            case RewardSource::kExploration: return SAL::kXPSourceExploration;
+            case RewardSource::kLock: return SAL::kXPSourceLock;
+            case RewardSource::kBook: return SAL::kXPSourceBook;
+            case RewardSource::kPickpocket: return SAL::kXPSourcePickpocket;
+            case RewardSource::kCount: break;
+        }
+        return SAL::kXPSourceQuest;
+    }
+
+    static_assert(ToPublicXPSource(RewardSource::kQuest) == SAL::kXPSourceQuest);
+    static_assert(ToPublicXPSource(RewardSource::kKill) == SAL::kXPSourceKill);
+    static_assert(ToPublicXPSource(RewardSource::kExploration) == SAL::kXPSourceExploration);
+    static_assert(ToPublicXPSource(RewardSource::kLock) == SAL::kXPSourceLock);
+    static_assert(ToPublicXPSource(RewardSource::kBook) == SAL::kXPSourceBook);
+    static_assert(ToPublicXPSource(RewardSource::kPickpocket) == SAL::kXPSourcePickpocket);
+    static_assert(static_cast<std::size_t>(RewardSource::kCount) == 6,
+        "a new RewardSource needs a public kXPSource* constant and a ToPublicXPSource case");
+
+    // The V4 XP multiplier after validation. Non-finite or <= 0 values count
+    // as 1; values above kMaxXPMultiplier are clamped (a garbage guard, not a
+    // balance cap). Finite values in (0, 1) are allowed and reduce XP.
+    inline constexpr double kMaxXPMultiplier = 100.0;
+
+    enum class XPMultiplierStatus : std::uint8_t {
+        kApplied,
+        kInvalid,
+        kClamped,
+    };
+
+    struct XPMultiplier {
+        double             value{ 1.0 };
+        XPMultiplierStatus status{ XPMultiplierStatus::kApplied };
+    };
+
+    [[nodiscard]] XPMultiplier SanitizeXPMultiplier(float raw) noexcept;
+
+    // amount = base * level scaling * multiplier, unrounded: the native XP
+    // bucket is a float, so fractional bonuses accumulate. The result may be
+    // non-finite or <= 0; the caller rejects those, which covers overflow.
+    [[nodiscard]] float CombineReward(float base, double scale, double multiplier) noexcept;
 
     // Per-source XP totals for the in-game Stats page. Session-only.
     struct SourceTotals {

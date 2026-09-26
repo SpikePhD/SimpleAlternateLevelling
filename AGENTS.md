@@ -18,7 +18,7 @@ SKSEPluginLoad()
 ├── Serialization callbacks  - cosave v6: persists pendingSkillPoints + skillsNormalized;
 │                              native PlayerSkills::xp remains owned by Skyrim
 ├── MessagingInterface kPostPostLoad
-│   └── Integration::Broadcast()      - dispatches SALInterfaceV3 (include/SAL_API.h) to all
+│   └── Integration::Broadcast()      - dispatches SALInterfaceV4 (include/SAL_API.h) to all
 │                                       plugins; companions listen for "SimpleAlternateLevelling"
 └── MessagingInterface kDataLoaded
     ├── SkillHook::Install()          - trampolines into PlayerCharacter::AddSkillExperience
@@ -52,8 +52,9 @@ SKSEPluginLoad()
 | `src/Progression.cpp` / `include/Progression.h` | Pure curve validation/threshold calculation and versioned cosave codec |
 | `src/RewardRules.cpp` / `include/RewardRules.h` | Dependency-free reward eligibility, lifecycle, arithmetic, and marker/lock mappings |
 | `src/Leveling.cpp` / `include/Leveling.h` | Game-setting synchronization, finalized-level threshold refresh with the integration multiplier, level-up-safe integration refresh |
-| `include/SAL_API.h` | Public consumer header: `SALInterfaceV3` with `SALInterfaceV2`/`SALInterfaceV1` prefixes (C types and function pointers only), message type, sender name |
+| `include/SAL_API.h` | Public consumer header: `SALInterfaceV4` with `SALInterfaceV3`/`V2`/`V1` prefixes (C types and function pointers only), message type, sender name, `kXPSource*` categories |
 | `src/Integration.cpp` / `include/Integration.h` | Interface instance, one-registrant slots, main-thread callback dispatch |
+| `include/IntegrationRules.h` | Dependency-free `CallbackSlot` (one registrant) and XP multiplier query, tested portably |
 | `src/UIRules.cpp` / `include/UIRules.h` | Dependency-free UI validation, transactional allocation session, level-up step hand-off and `LevelUpFlow` sequence, character-created signal |
 | `src/SkillHook.cpp` / `include/SkillHook.h` | `write_branch<5>` hooks: AddSkillExperience (discard), TESObjectBOOK::Activate (world-read trigger) |
 | `src/SkillMenu.cpp` / `include/SkillMenu.h` | Validated Scaleform boundary, menu lifecycle, preview/commit transaction, vanilla continuation |
@@ -141,6 +142,7 @@ descriptions come from `tools/generate_settings_translation.py`.
 Action in game
   -> Hook / Event sink fires on main thread
   -> XPManager::AwardXP(amount, source)
+      -> amount = base * RewardScale * V4 XP multiplier (queried live, unrounded)
       -> skills->data->xp += amount          (native engine XP bucket)
       -> engine checks xp >= levelThreshold  (every tick, natively)
       -> AdvanceLevel() fires natively       (attribute screen, perk point, overflow carry)
@@ -177,6 +179,15 @@ Every reward is scaled in `XPManager::AwardXP`, the single entry point for all s
 ```text
 reward = base * (threshold(level) / threshold(1)) ^ min(1, reward_scaling * weight[source])
 ```
+
+The integration V4 XP multiplier is then applied per award:
+`amount = RewardRules::CombineReward(base, scale, Integration::XPMultiplier(source))`.
+The provider is called live on every award (no caching) with the public `kXPSource*`
+category from `RewardRules::ToPublicXPSource` (explicit mapping, static_asserted; never cast
+`RewardSource`). `RewardRules::SanitizeXPMultiplier` treats non-finite/`<= 0` as 1 and clamps
+above 100, warning once per session. The result is not rounded, and it precedes the finite and
+overflow checks. It never touches the threshold, the V1 threshold multiplier, `RewardScale`, or
+the cosave. `XPJournal::Entry::bonusMultiplier` records it for the XP Log.
 
 `Progression::RewardScale` computes the factor from the same capped curve, so it stops
 growing at the cap. `RewardRules::ClassifyRewardSource` maps the award's source key to one

@@ -69,6 +69,7 @@ FIXED = {
     "$SAL_LOG_COL_DETAIL": "Details",
     "$SAL_LOG_DETAIL": "base {base} x{scale}",
     "$SAL_LOG_ENEMY_LEVEL": "enemy level {level}",
+    "$SAL_LOG_BONUS": "x{multiplier} from other mods",
     "$SAL_LOG_DIAGNOSTICS": "Diagnostics (recent plugin log)",
     "$SAL_LOG_EMPTY": "No entries yet. The log starts when you load a game.",
     "$SAL_NOTE_MINION": "Your own minion: no XP",

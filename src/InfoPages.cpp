@@ -259,6 +259,10 @@ namespace EA::InfoPages {
                     auto detail = UIText::Format(T("$SAL_LOG_DETAIL"), {
                         { "base", std::format("{:g}", entry.baseXP) },
                         { "scale", std::format("{:.2f}", entry.scale) } });
+                    if (entry.bonusMultiplier != 1.0) {
+                        detail += "  " + UIText::Format(T("$SAL_LOG_BONUS"), {
+                            { "multiplier", std::format("{:.2f}", entry.bonusMultiplier) } });
+                    }
                     if (entry.enemyLevel > 0) {
                         detail += "  " + UIText::Format(T("$SAL_LOG_ENEMY_LEVEL"), {
                             { "level", std::to_string(entry.enemyLevel) } });

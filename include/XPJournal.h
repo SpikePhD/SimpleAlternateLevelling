@@ -30,6 +30,7 @@ namespace EA::XPJournal {
         int                         count{ 0 };  // objectives merged into one reward
         float                       baseXP{ 0.0f };
         double                      scale{ 1.0 };
+        double                      bonusMultiplier{ 1.0 };  // companion-mod XP multiplier (integration V4)
         float                       xp{ 0.0f };
         int                         playerLevel{ 0 };
     };

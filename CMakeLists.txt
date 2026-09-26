@@ -208,6 +208,13 @@ if(BUILD_TESTS)
     target_include_directories(SimpleAlternateLevellingRewardTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     add_test(NAME reward_event_rules COMMAND SimpleAlternateLevellingRewardTests)
 
+    add_executable(SimpleAlternateLevellingIntegrationTests
+        tests/IntegrationRulesTests.cpp
+    )
+    target_compile_features(SimpleAlternateLevellingIntegrationTests PRIVATE cxx_std_23)
+    target_include_directories(SimpleAlternateLevellingIntegrationTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    add_test(NAME integration_rules COMMAND SimpleAlternateLevellingIntegrationTests)
+
     add_executable(SimpleAlternateLevellingLogPolicyTests
         tests/LogPolicyTests.cpp
         src/LogPolicy.cpp

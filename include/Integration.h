@@ -1,5 +1,7 @@
 #pragma once
 
+#include "RewardRules.h"
+
 #include <cstdint>
 
 // SAL side of the public integration API (include/SAL_API.h). Registration
@@ -23,6 +25,11 @@ namespace EA::Integration {
     // The provider's raw value (0 when none is registered or it throws).
     // Clamping is UIRules::ClampSkillPointBonus's job.
     [[nodiscard]] std::int32_t SkillPointBonus(std::uint32_t level);
+
+    // The V4 XP multiplier for one award, already validated by
+    // RewardRules::SanitizeXPMultiplier (1 when none is registered). Queried
+    // live on every award. Invalid or clamped values warn once per session.
+    [[nodiscard]] double XPMultiplier(RewardRules::RewardSource source);
 
     void NotifyCharacterCreated();
 }

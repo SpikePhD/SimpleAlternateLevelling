@@ -152,6 +152,12 @@ exponent = min(1, reward growth x source weight)
 - The exponent never exceeds 1, and the factor stops growing once the XP curve
   reaches its cap.
 
+A companion plugin using the [Integration API](#integration-api) may also
+multiply every reward as it is earned (for example an Intelligence trait or a
+temporary potion): `reward = base value x scaling x multiplier`. It applies only
+to XP earned while it is active and never changes the XP needed per level. The
+XP Log shows it as "x1.50 from other mods".
+
 With the defaults the scaling factors are:
 
 | Your level | XP needed | Quests (x^0.30) | Kills (x^0.75) | Other sources (x^0.50) |
@@ -316,9 +322,9 @@ before. Copy [`include/SAL_API.h`](include/SAL_API.h) into the companion
 project; it depends only on `<cstdint>` and uses plain C types and function
 pointers, so it is safe across DLLs built with different toolchains.
 
-The current version is **3**. `SALInterfaceV3` starts with a complete
-`SALInterfaceV2`, which starts with a complete `SALInterfaceV1`, so plugins
-written for V1 or V2 keep working.
+The current version is **4**. `SALInterfaceV4` starts with a complete
+`SALInterfaceV3`, which starts with a complete `SALInterfaceV2`, which starts
+with a complete `SALInterfaceV1`, so plugins written for V1-V3 keep working.
 
 ### Handshake
 
@@ -326,7 +332,7 @@ written for V1 or V2 keep working.
    `SAL::kSenderName` (`"SimpleAlternateLevelling"`).
 2. At `kPostPostLoad`, SAL dispatches a message of type
    `SAL::kMessageInterface` to all listeners. `msg->data` points to a static
-   `SAL::SALInterfaceV3` (`v2.v1.version == 3`, `dataLen == sizeof(SALInterfaceV3)`)
+   `SAL::SALInterfaceV4` (`v3.v2.v1.version == 4`, `dataLen == sizeof(SALInterfaceV4)`)
    that stays valid for the life of the process.
 3. Check `dataLen` and `version` for the version you need, keep the pointer,
    and register callbacks. With an older SAL, fall back to the members it has.
@@ -337,6 +343,9 @@ messaging->RegisterListener(SAL::kSenderName, [](SKSE::MessagingInterface::Messa
         return;
     }
     const auto* v1 = static_cast<const SAL::SALInterfaceV1*>(msg->data);
+    if (v1->version >= SAL::kInterfaceVersion4 && msg->dataLen >= sizeof(SAL::SALInterfaceV4)) {
+        static_cast<const SAL::SALInterfaceV4*>(msg->data)->RegisterXPMultiplier(&MyXPMultiplier);
+    }
     if (v1->version >= SAL::kInterfaceVersion3 && msg->dataLen >= sizeof(SAL::SALInterfaceV3)) {
         static_cast<const SAL::SALInterfaceV3*>(msg->data)->RegisterSkillPointBonus(&MyBonus);
     }
@@ -383,13 +392,14 @@ The threshold is refreshed only when the final vanilla LevelUp Menu closes.
 
 | Member | Contract |
 |---|---|
-| `v1.version` | `3` in a V3 broadcast (`2` or `1` from an older SAL). Later versions only append members. |
+| `v1.version` | `4` in a V4 broadcast (`3`, `2`, or `1` from an older SAL). Later versions only append members. |
 | `RegisterThresholdMultiplier(float (*provider)())` | `provider()` returns a multiplier for the XP needed per level. It is called whenever SAL writes the threshold: data load, game load, new game, settings changes, after each level-up, and on request. Non-finite or `<= 0` values are ignored (treated as 1.0); results are clamped to `[threshold_multiplier_floor, 1.0]`. It never changes reward scaling or the native `fXPLevelUpBase`/`fXPLevelUpMult` settings. |
 | `RequestThresholdRefresh()` | Recomputes the threshold after the provider's value changes. Requests made during a level-up (from interception or `LevelIncrease` until the vanilla LevelUp Menu closes, including both steps) are folded into the refresh SAL already does when that menu closes, so the engine's XP subtraction is never disturbed. |
 | `RegisterPreSkillMenuStep(bool (*wantsStep)(uint32_t level))` (V2) | Runs on every level-up SAL intercepts, before its skill menu, regardless of how many skill points it grants. `level` is the player's current level. `false` continues immediately; `true` makes SAL wait for `ContinueLevelUp`, after which it opens its skill menu (or skips it as usual when there are no points). Only decide and queue your UI here. |
 | `RegisterSkillPointBonus(int32_t (*bonus)(uint32_t level))` (V3) | Adds whole skill points to a level-up. Called **exactly once per intercepted level-up**, after the pre-skill-menu step has finished (or right away when there is none) and before SAL totals the points; never for stray or re-opened menus. `level` is the player's current level. The level's points become `pending + points_per_level + bonus`, so a bonus alone still opens the skill menu. Negative or throwing providers count as 0; values above 1000 are clamped to 1000; both are logged. If the skill menu cannot open, its session cannot start, or a commit is rejected, the bonus stays in SAL's pending points like the base grant. The menu shows it as "+N bonus from other mods" (`$SAL_ALLOC_BONUS`). |
 | `RegisterLevelUpStep(bool (*wantsStep)(uint32_t level))` | Runs when SAL is about to open the vanilla menu: after Confirm, and also when its own menu is skipped because there are no points or it failed to open. Same `true`/`false` contract; after `ContinueLevelUp` the vanilla LevelUp Menu opens. |
 | `ContinueLevelUp()` | Resumes **whichever step is waiting**. Idempotent; ignored when nothing waits. |
+| `RegisterXPMultiplier(float (*provider)(uint32_t sourceCategory))` (V4) | Multiplies every XP award as it is earned: `amount = base x level scaling x multiplier`. Called **once per award on the main thread, with no caching**, so a temporary buff affects exactly the awards made while it is active; keep it cheap. `sourceCategory` is one of `kXPSourceQuest` (0), `kXPSourceKill` (1), `kXPSourceExploration` (2), `kXPSourceLock` (3), `kXPSourceBook` (4), `kXPSourcePickpocket` (5); the values are stable, new ones are only appended, and an unknown category should be treated like any other. Finite values in (0, 1) reduce XP. Non-finite, `<= 0`, or throwing providers count as 1.0; values above 100 are clamped to 100; both warn once per session. The result is not rounded. It never changes the XP needed per level or SAL's level scaling. The XP Log shows it as "x{multiplier} from other mods" (`$SAL_LOG_BONUS`). |
 | `RegisterCharacterCreated(void (*callback)())` | Called once per new character, after RaceSex Menu/RaceMenu closes and SAL has applied its starting skills (in Vanilla starting-skills mode, right after the menu closes). Never called for loaded saves or for a mid-game `showracemenu`. |
 
 ### Step owners must always continue, exactly once

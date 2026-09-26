@@ -134,6 +134,30 @@ namespace EA::RewardRules {
         return RewardSource::kQuest;
     }
 
+    XPMultiplier SanitizeXPMultiplier(float raw) noexcept
+    {
+        const auto value = static_cast<double>(raw);
+        if (!std::isfinite(value) || value <= 0.0) {
+            return { 1.0, XPMultiplierStatus::kInvalid };
+        }
+        if (value > kMaxXPMultiplier) {
+            return { kMaxXPMultiplier, XPMultiplierStatus::kClamped };
+        }
+        return { value, XPMultiplierStatus::kApplied };
+    }
+
+    float CombineReward(float base, double scale, double multiplier) noexcept
+    {
+        const double amount = static_cast<double>(base) * scale * multiplier;
+        // Converting an out-of-range double to float is undefined; report
+        // overflow as infinity so the caller's finite check rejects it.
+        if (std::isfinite(amount) && std::abs(amount) > std::numeric_limits<float>::max()) {
+            return amount > 0.0 ? std::numeric_limits<float>::infinity()
+                                : -std::numeric_limits<float>::infinity();
+        }
+        return static_cast<float>(amount);
+    }
+
     void SessionStats::Add(RewardSource source, double xp) noexcept
     {
         const auto index = static_cast<std::size_t>(source);

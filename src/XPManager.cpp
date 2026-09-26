@@ -1,6 +1,7 @@
 #include "PCH.h"
 #include "XPManager.h"
 #include "Config.h"
+#include "Integration.h"
 #include "Progression.h"
 #include "RewardRules.h"
 #include "XPJournal.h"
@@ -287,7 +288,10 @@ namespace EA::XPManager {
         const auto level = static_cast<std::uint32_t>(player->GetLevel());
         const auto scale = Progression::RewardScale(level,
             { EA::Config::xpBase, EA::Config::xpIncrease, EA::Config::xpCap }, EA::Config::rewardScaling * weight);
-        const float amount = static_cast<float>(static_cast<double>(baseAmount) * scale);
+        // Companion-mod multiplier (integration V4), read live so temporary
+        // buffs affect exactly the awards made while they are active.
+        const auto multiplier = Integration::XPMultiplier(source);
+        const float amount = RewardRules::CombineReward(baseAmount, scale, multiplier);
         if (!std::isfinite(amount) || amount <= 0.0f) {
             logger::warn("[EA] AwardXP: scaled amount {} from source '{}' is invalid; award rejected.",
                 amount, context.sourceKey);
@@ -317,10 +321,11 @@ namespace EA::XPManager {
         skills->data->xp = systemXPAfter;
 
         if (EA::Config::verbose) {
-            logger::info("[EA] XP award: +{:.1f} (base {:.1f} x{:.2f}) | source={} | {} | system_xp={:.1f} -> {:.1f} | threshold={:.1f} | level={}",
+            logger::info("[EA] XP award: +{:.1f} (base {:.1f} x{:.2f} x{:.2f}) | source={} | {} | system_xp={:.1f} -> {:.1f} | threshold={:.1f} | level={}",
                 amount,
                 baseAmount,
                 scale,
+                multiplier,
                 context.sourceKey,
                 DescribeContext(context),
                 systemXPBefore,
@@ -333,6 +338,7 @@ namespace EA::XPManager {
         entry.source = source;
         entry.baseXP = baseAmount;
         entry.scale = scale;
+        entry.bonusMultiplier = multiplier;
         entry.xp = amount;
         entry.playerLevel = static_cast<int>(level);
         if (context.kind == AwardKind::Kill) {
